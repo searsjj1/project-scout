@@ -249,7 +249,7 @@ export default async function handler(req, res) {
       keywords: src.keywords_to_watch || src.keywords || [],
       category: src.source_family || src.category || '',
       priority: src.priority_tier || src.priority || 'medium',
-      organization: src.entity_id || src.organization || '',
+      organization: src.entity_name || src.organization || src.source_name || src.name || '',
     });
     const activeNorm = active.map(normalize);
 

@@ -1577,7 +1577,13 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
 
     // Load current persisted data
     const currentSources = JSON.parse(localStorage.getItem('ps_sources') || '[]');
-    const activeSources = currentSources.filter(s => s.active !== false);
+    const currentEntities = JSON.parse(localStorage.getItem('ps_entities') || '[]');
+    const entityNameMap = {};
+    currentEntities.forEach(e => { if (e.entity_id && e.entity_name) entityNameMap[e.entity_id] = e.entity_name; });
+    const activeSources = currentSources.filter(s => s.active !== false).map(s => ({
+      ...s,
+      entity_name: entityNameMap[s.entity_id] || s.entity_name || '',
+    }));
     const currentFP = JSON.parse(localStorage.getItem('ps_focuspoints') || '[]');
     const activeFP = currentFP.filter(f => f.active);
     const currentOrgs = JSON.parse(localStorage.getItem('ps_targetorgs') || '[]');
