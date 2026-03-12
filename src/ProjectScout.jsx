@@ -1584,6 +1584,26 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
       ...s,
       entity_name: entityNameMap[s.entity_id] || s.entity_name || '',
     }));
+
+    // ── Region-level scan control: filter out sources whose ALL coverage regions are inactive ──
+    const coverageRegions = JSON.parse(localStorage.getItem('ps_coverage_regions') || '[]');
+    const activeRegionIds = new Set(coverageRegions.filter(r => r.active).map(r => r.region_id));
+    const beforeRegionFilter = activeSources.length;
+    const regionFilteredSources = activeSources.filter(s => {
+      const srcRegions = s.coverage_regions || [];
+      // If source has no coverage_regions assigned, keep it (don't orphan it)
+      if (srcRegions.length === 0) return true;
+      // Keep if at least one of its regions is active
+      return srcRegions.some(rid => activeRegionIds.has(rid));
+    });
+    const regionSkipped = beforeRegionFilter - regionFilteredSources.length;
+    if (regionSkipped > 0) {
+      const inactiveNames = coverageRegions.filter(r => !r.active).map(r => r.region_name).join(', ');
+      addLog(`⊘ Region filter: ${regionSkipped} source${regionSkipped === 1 ? '' : 's'} skipped (inactive regions: ${inactiveNames})`);
+    }
+    // Replace activeSources with region-filtered list for all downstream use
+    const sourcesForScan = regionFilteredSources;
+
     const currentFP = JSON.parse(localStorage.getItem('ps_focuspoints') || '[]');
     const activeFP = currentFP.filter(f => f.active);
     const currentOrgs = JSON.parse(localStorage.getItem('ps_targetorgs') || '[]');
@@ -1594,17 +1614,17 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
 
       if (isConnected) {
         // ─── CONNECTED MODE: call real backend ────────────────
-        if (activeSources.length === 0) {
-          addLog('⚠ No active sources found in Source Registry. Add sources in the Source Registry tab before running the engine.');
+        if (sourcesForScan.length === 0) {
+          addLog('⚠ No scannable sources — either none are active or all active sources belong to inactive regions. Check Source Registry and Geography settings.');
           setEngineState('complete');
           return;
         }
-        addLog(`Sending request to backend (${activeSources.length} sources, ${allLeads.length} existing leads)...`);
+        addLog(`Sending request to backend (${sourcesForScan.length} source${sourcesForScan.length === 1 ? '' : 's'}, ${allLeads.length} existing leads)...`);
         const resp = await fetch(`${settings.backendEndpoint}/api/scan?action=${action}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sources: activeSources, focusPoints: activeFP, targetOrgs: activeOrgs,
+            sources: sourcesForScan, focusPoints: activeFP, targetOrgs: activeOrgs,
             existingLeads: allLeads, notPursuedLeads: notPursuedLeads,
             settings,
           }),
@@ -1615,12 +1635,12 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
         results = data.results;
       } else {
         // ─── LOCAL MODE: client-side rule-based engine ────────
-        if (activeSources.length === 0) {
-          addLog('⚠ No active sources in Source Registry. Add sources first.');
+        if (sourcesForScan.length === 0) {
+          addLog('⚠ No scannable sources — either none are active or all active sources belong to inactive regions. Check Source Registry and Geography settings.');
           setEngineState('complete');
           return;
         }
-        results = await runLocalEngine(action, activeSources, activeFP, activeOrgs, allLeads, notPursuedLeads, submittedLeads, settings, addLog);
+        results = await runLocalEngine(action, sourcesForScan, activeFP, activeOrgs, allLeads, notPursuedLeads, submittedLeads, settings, addLog);
       }
 
       // ─── MERGE results into persisted lead state ────────────

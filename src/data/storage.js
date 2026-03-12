@@ -20,6 +20,7 @@ export function setTable(key, data) { return storageSet(key, data); }
 
 export function getSourceFamilies()  { return getTable(KEYS.SOURCE_FAMILIES); }
 export function getCoverageRegions() { return getTable(KEYS.COVERAGE_REGIONS); }
+export function setCoverageRegions(data) { return setTable(KEYS.COVERAGE_REGIONS, data); }
 export function getCountyMapping()   { return getTable(KEYS.COUNTY_MAPPING); }
 export function getEntities()        { return getTable(KEYS.ENTITIES); }
 export function setEntities(data)    { return setTable(KEYS.ENTITIES, data); }

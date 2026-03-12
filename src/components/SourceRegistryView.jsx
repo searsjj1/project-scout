@@ -4,7 +4,7 @@
  * Phase 1 Step 6 — Sources CRUD added.
  */
 import { useState, useEffect, useMemo } from 'react';
-import { getSourceFamilies, getSources, setSources, getEntities, setEntities, getCoverageRegions, getCountyMapping, getProposedSources, setProposedSources, getProposedEntities, setProposedEntities } from '../data/storage.js';
+import { getSourceFamilies, getSources, setSources, getEntities, setEntities, getCoverageRegions, setCoverageRegions, getCountyMapping, getProposedSources, setProposedSources, getProposedEntities, setProposedEntities } from '../data/storage.js';
 import { ENTITY_TYPES, EXPECTED_FAMILIES_BY_TYPE } from '../data/seedData.js';
 import { createSource, createEntity, createProposedSource, createProposedEntity, CHECK_FREQUENCIES, TIERS } from '../data/schemas.js';
 
@@ -68,7 +68,7 @@ export default function SourceRegistryView() {
       {/* Sub-tab content */}
       {sub === 'sources'  && <SourcesTable sources={data.sources} entities={data.entities} families={data.families} onChanged={handleSourcesChanged} />}
       {sub === 'entities' && <EntitiesTable entities={data.entities} sources={data.sources} families={data.families} regions={data.regions} onChanged={handleSourcesChanged} />}
-      {sub === 'geography'&& <GeographyView regions={data.regions} counties={data.counties} />}
+      {sub === 'geography'&& <GeographyView regions={data.regions} counties={data.counties} onChanged={handleSourcesChanged} />}
       {sub === 'families' && <FamiliesTable families={data.families} sources={data.sources} />}
       {sub === 'proposed' && <ProposedSourcesQueue proposals={data.proposedSrc} entities={data.entities} families={data.families} sources={data.sources} onChanged={handleSourcesChanged} />}
       {sub === 'propent'  && <ProposedEntitiesQueue proposals={data.proposedEnt} entities={data.entities} regions={data.regions} onChanged={handleSourcesChanged} />}
@@ -781,7 +781,7 @@ function PhaseTag({ text }) {
   return <div style={{ marginTop:16, fontSize:11, color:'#10b981', fontWeight:600 }}>✓ Data loaded — {text}</div>;
 }
 
-function GeographyView({ regions, counties }) {
+function GeographyView({ regions, counties, onChanged }) {
   /* ── Region state ── */
   const [regSearch, setRegSearch] = useState('');
   const [regActive, setRegActive] = useState('all');   // all | active | inactive
@@ -836,6 +836,16 @@ function GeographyView({ regions, counties }) {
   const handleCtySort = col => { if (ctySort === col) setCtyDir(d => d === 'asc' ? 'desc' : 'asc'); else { setCtySort(col); setCtyDir('asc'); } };
   const arrow = (active, col, dir) => active === col ? (dir === 'asc' ? ' ↑' : ' ↓') : '';
 
+  /* ── Toggle region active/inactive ── */
+  const handleToggleRegion = (regionId) => {
+    const allRegions = getCoverageRegions();
+    const updated = allRegions.map(r =>
+      r.region_id === regionId ? { ...r, active: !r.active } : r
+    );
+    setCoverageRegions(updated);
+    if (onChanged) onChanged();
+  };
+
   const activeRegions   = regions.filter(r => r.active).length;
   const inactiveRegions = regions.length - activeRegions;
 
@@ -873,12 +883,12 @@ function GeographyView({ regions, counties }) {
 
       {/* Region table */}
       <div style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:10, overflow:'hidden', marginBottom:28 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'2fr 1.2fr 1.2fr 0.8fr 0.6fr', gap:0, padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #e2e8f0', fontSize:10.5, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'2fr 1.2fr 1.2fr 0.8fr 1fr', gap:0, padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #e2e8f0', fontSize:10.5, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em' }}>
           <div style={{ cursor:'pointer' }} onClick={() => handleRegSort('region_name')}>Region{arrow(regSort,'region_name',regDir)}</div>
           <div style={{ cursor:'pointer' }} onClick={() => handleRegSort('office_assignment')}>Office{arrow(regSort,'office_assignment',regDir)}</div>
           <div>Description</div>
           <div style={{ cursor:'pointer' }} onClick={() => handleRegSort('counties')}>Counties{arrow(regSort,'counties',regDir)}</div>
-          <div>Status</div>
+          <div>Scan Control</div>
         </div>
         {filteredRegions.length === 0 && (
           <div style={{ padding:'36px 20px', textAlign:'center', color:'#94a3b8' }}>
@@ -887,7 +897,7 @@ function GeographyView({ regions, counties }) {
         )}
         {filteredRegions.map(r => (
           <div key={r.region_id} style={{
-            display:'grid', gridTemplateColumns:'2fr 1.2fr 1.2fr 0.8fr 0.6fr',
+            display:'grid', gridTemplateColumns:'2fr 1.2fr 1.2fr 0.8fr 1fr',
             gap:0, padding:'11px 16px', borderBottom:'1px solid #f1f5f9',
             opacity: r.active ? 1 : 0.55, transition:'background 0.1s',
           }}
@@ -898,7 +908,21 @@ function GeographyView({ regions, counties }) {
             <div style={{ fontSize:12, color:'#475569' }}>{r.office_assignment || '—'}</div>
             <div style={{ fontSize:11, color:'#94a3b8', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.description || '—'}</div>
             <div style={{ fontSize:13, fontWeight:700, color:'#0f172a' }}>{countyCountByRegion[r.region_id] || 0}</div>
-            <div><span style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:4, background: r.active ? '#dcfce7' : '#f1f5f9', color: r.active ? '#166534' : '#94a3b8' }}>{r.active ? 'Active' : 'Inactive'}</span></div>
+            <div>
+              <button
+                onClick={() => handleToggleRegion(r.region_id)}
+                title={r.active ? `Deactivate ${r.region_name} — sources only in this region will be skipped during scans` : `Activate ${r.region_name} — sources in this region will be included in scans`}
+                style={{
+                  fontSize:10, fontWeight:600, padding:'3px 10px', borderRadius:4, cursor:'pointer',
+                  border: r.active ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
+                  background: r.active ? '#dcfce7' : '#f1f5f9',
+                  color: r.active ? '#166534' : '#94a3b8',
+                  transition:'all 0.15s',
+                }}
+              >
+                {r.active ? 'Active' : 'Inactive'}
+              </button>
+            </div>
           </div>
         ))}
       </div>
