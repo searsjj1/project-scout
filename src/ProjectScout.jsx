@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Search, ChevronRight, ChevronDown, ExternalLink, MapPin, Building2, Calendar, DollarSign, TrendingUp, Activity, Clock, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Radio, Settings as SettingsIcon, Layers, Send, Archive, Filter, ArrowUpRight, X, BarChart3, Globe, Bookmark, Zap, RefreshCw, Plus, Minus, ChevronLeft, Database, Target, BookOpen, Wifi, WifiOff, Star, Pause, Play, Trash2, Edit3, TestTube, Copy, Save, RotateCcw, Power, Link2, Hash, FileText, Users, Crosshair, UserPlus, ClipboardCheck, MessageSquare, ArrowRight, Shield, Flag } from "lucide-react";
+import { Search, ChevronRight, ChevronDown, ExternalLink, MapPin, Building2, Calendar, DollarSign, TrendingUp, Activity, Clock, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Radio, Settings as SettingsIcon, Layers, Send, Archive, Filter, ArrowUpRight, X, BarChart3, Globe, Bookmark, Zap, RefreshCw, Plus, Minus, ChevronLeft, Database, Target, BookOpen, Wifi, WifiOff, Star, Pause, Play, Trash2, Edit3, TestTube, Copy, Save, RotateCcw, Power, Link2, Hash, FileText, Users, Crosshair, UserPlus, ClipboardCheck, MessageSquare, ArrowRight, Shield, Flag, Download } from "lucide-react";
 
 // Phase 2 data foundation
 import { runMigration } from './data/migration.js';
@@ -531,7 +531,16 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
             {isSubmitted ? (
               <>
                 {/* ── Tracking origin banner ── */}
-                {lead.tracking_origin === 'matched_existing' ? (
+                {lead.tracking_origin === 'imported_from_asana' ? (
+                  <div style={{ padding:'16px', background:'#fffbeb', borderRadius:10, border:'1px solid #fde68a' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, fontWeight:700, color:'#92400e', marginBottom:6 }}>
+                      <Download size={16} /> Imported from Asana
+                    </div>
+                    <p style={{ fontSize:12, color:'#64748b', margin:'0 0 4px', lineHeight:1.5 }}>
+                      This is a historical task imported from the Asana board for context and visibility. It was not discovered or submitted by Scout.
+                    </p>
+                  </div>
+                ) : lead.tracking_origin === 'matched_existing' ? (
                   <div style={{ padding:'16px', background:'#f5f3ff', borderRadius:10, border:'1px solid #ddd6fe' }}>
                     <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, fontWeight:700, color:'#5b21b6', marginBottom:6 }}>
                       <Bookmark size={16} /> Confirmed Asana Match
@@ -859,10 +868,20 @@ const selectStyle = { padding: '9px 12px', borderRadius: 8, border: '1px solid #
    TAB: SUBMITTED TO ASANA
    ═══════════════════════════════════════════════════════════════ */
 
-function SubmittedTab({ leads, onSelectLead }) {
-  if (leads.length === 0) return <EmptyState icon={<Send size={36} />} title="No Leads in Asana Tracking" message="Submit leads from the Active / Watch tab or confirm Asana matches to track projects through the Go/No-Go review process." />;
+function SubmittedTab({ leads, onSelectLead, onImport }) {
+  if (leads.length === 0) return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:16 }}>
+        <button onClick={onImport} style={{ padding:'8px 16px', borderRadius:7, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:12, fontWeight:600, color:'#475569', display:'flex', alignItems:'center', gap:5 }}>
+          <Download size={13} /> Import from Asana
+        </button>
+      </div>
+      <EmptyState icon={<Send size={36} />} title="No Projects in Asana Tracking" message="Submit leads from the Active / Watch tab, confirm Asana matches, or import existing Asana board history to track projects here." />
+    </div>
+  );
 
   const originBadge = (lead) => {
+    if (lead.tracking_origin === 'imported_from_asana') return { label:'Imported from Asana', bg:'#fef3c7', fg:'#92400e' };
     if (lead.tracking_origin === 'matched_existing') return { label:'Confirmed Asana Match', bg:'#ede9fe', fg:'#5b21b6' };
     if (lead.tracking_origin === 'submitted_from_scout') return { label:'Submitted from Scout', bg:'#dbeafe', fg:'#1e40af' };
     // Legacy leads without tracking_origin
@@ -874,29 +893,41 @@ function SubmittedTab({ leads, onSelectLead }) {
     return null;
   };
 
-  const matchCount = leads.filter(l => l.tracking_origin === 'matched_existing' || l.submissionNotes?.includes('Confirmed Asana match')).length;
-  const submitCount = leads.length - matchCount;
+  const importCount = leads.filter(l => l.tracking_origin === 'imported_from_asana').length;
+  const matchCount = leads.filter(l => l.tracking_origin === 'matched_existing' || (!l.tracking_origin && l.submissionNotes?.includes('Confirmed Asana match'))).length;
+  const submitCount = leads.length - matchCount - importCount;
 
   return (
     <div>
-      {/* Summary bar */}
-      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
-        <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
-          <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Tracked</div>
-          <div style={{ fontSize:18, fontWeight:800, color:'#3b82f6' }}>{leads.length}</div>
+      {/* Summary bar + import button */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16, flexWrap:'wrap', gap:10 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
+            <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Tracked</div>
+            <div style={{ fontSize:18, fontWeight:800, color:'#3b82f6' }}>{leads.length}</div>
+          </div>
+          {submitCount > 0 && (
+            <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Submitted</div>
+              <div style={{ fontSize:18, fontWeight:800, color:'#1e40af' }}>{submitCount}</div>
+            </div>
+          )}
+          {matchCount > 0 && (
+            <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Matched</div>
+              <div style={{ fontSize:18, fontWeight:800, color:'#5b21b6' }}>{matchCount}</div>
+            </div>
+          )}
+          {importCount > 0 && (
+            <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Imported</div>
+              <div style={{ fontSize:18, fontWeight:800, color:'#92400e' }}>{importCount}</div>
+            </div>
+          )}
         </div>
-        {submitCount > 0 && (
-          <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
-            <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Submitted</div>
-            <div style={{ fontSize:18, fontWeight:800, color:'#1e40af' }}>{submitCount}</div>
-          </div>
-        )}
-        {matchCount > 0 && (
-          <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
-            <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Matched</div>
-            <div style={{ fontSize:18, fontWeight:800, color:'#5b21b6' }}>{matchCount}</div>
-          </div>
-        )}
+        <button onClick={onImport} style={{ padding:'8px 16px', borderRadius:7, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:12, fontWeight:600, color:'#475569', display:'flex', alignItems:'center', gap:5, flexShrink:0 }}>
+          <Download size={13} /> Import from Asana
+        </button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
@@ -918,6 +949,209 @@ function SubmittedTab({ leads, onSelectLead }) {
         })}
       </div>
     </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ASANA IMPORT MODAL
+   ═══════════════════════════════════════════════════════════════ */
+
+function AsanaImportModal({ onClose, onFetch, onImport, existingGids }) {
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [search, setSearch] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [importResult, setImportResult] = useState(null);
+
+  // Fetch on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const result = await onFetch();
+      if (cancelled) return;
+      if (result.error) { setError(result.error); setLoading(false); return; }
+      setTasks(result.tasks);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [onFetch]);
+
+  // Derive sections list
+  const sections = useMemo(() => {
+    const s = new Set();
+    tasks.forEach(t => { if (t.section) s.add(t.section); });
+    return [...s].sort();
+  }, [tasks]);
+
+  // Already-tracked GIDs set
+  const trackedGids = useMemo(() => new Set(existingGids || []), [existingGids]);
+
+  // Filtered tasks
+  const filtered = useMemo(() => {
+    let list = [...tasks];
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(t => t.name?.toLowerCase().includes(q) || t.assignee_name?.toLowerCase().includes(q));
+    }
+    if (sectionFilter !== 'all') list = list.filter(t => t.section === sectionFilter);
+    if (statusFilter === 'incomplete') list = list.filter(t => !t.completed);
+    if (statusFilter === 'completed') list = list.filter(t => t.completed);
+    return list;
+  }, [tasks, search, sectionFilter, statusFilter]);
+
+  const selectAll = () => {
+    const s = new Set(selected);
+    filtered.forEach(t => { if (!trackedGids.has(t.gid)) s.add(t.gid); });
+    setSelected(s);
+  };
+  const selectNone = () => {
+    const s = new Set(selected);
+    filtered.forEach(t => s.delete(t.gid));
+    setSelected(s);
+  };
+  const toggleTask = (gid) => {
+    const s = new Set(selected);
+    if (s.has(gid)) s.delete(gid); else s.add(gid);
+    setSelected(s);
+  };
+
+  const handleImport = () => {
+    const toImport = tasks.filter(t => selected.has(t.gid));
+    const result = onImport(toImport);
+    setImportResult(result);
+    // Clear selections for imported tasks
+    setSelected(new Set());
+  };
+
+  const formatDate = (d) => { try { return new Date(d).toLocaleDateString(); } catch { return ''; } };
+
+  return (
+    <Modal title="Import from Asana" onClose={onClose} width={780}>
+      {loading && (
+        <div style={{ textAlign:'center', padding:'40px 20px', color:'#94a3b8' }}>
+          <RefreshCw size={24} style={{ animation:'spin 1s linear infinite', marginBottom:12 }} />
+          <div style={{ fontSize:13, fontWeight:600 }}>Fetching tasks from Asana board...</div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ padding:'20px', background:'#fef2f2', borderRadius:10, border:'1px solid #fecaca', color:'#991b1b', fontSize:13 }}>
+          <strong>Error:</strong> {error}
+        </div>
+      )}
+
+      {importResult && (
+        <div style={{ padding:'14px 16px', background:'#f0fdf4', borderRadius:10, border:'1px solid #bbf7d0', marginBottom:14, fontSize:13, color:'#166534' }}>
+          <strong>Import complete:</strong> {importResult.imported} task{importResult.imported !== 1 ? 's' : ''} imported.
+          {importResult.skipped > 0 && ` ${importResult.skipped} skipped (already tracked).`}
+        </div>
+      )}
+
+      {!loading && !error && (
+        <>
+          {/* Info banner */}
+          <div style={{ padding:'10px 14px', background:'#fffbeb', borderRadius:8, border:'1px solid #fde68a', marginBottom:14, fontSize:11.5, color:'#92400e', lineHeight:1.5 }}>
+            These are existing Asana board tasks — not leads discovered by Scout. Importing them creates historical context entries in the Asana Tracked tab for visibility.
+          </div>
+
+          {/* Filters */}
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:12, alignItems:'center' }}>
+            <div style={{ flex:'1 1 180px', position:'relative' }}>
+              <Search size={13} style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', color:'#94a3b8' }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search task name or assignee..." style={{ width:'100%', padding:'7px 10px 7px 28px', borderRadius:7, border:'1px solid #e2e8f0', fontSize:12, outline:'none', background:'#fafbfc', boxSizing:'border-box' }} />
+            </div>
+            <select value={sectionFilter} onChange={e => setSectionFilter(e.target.value)} style={{ padding:'7px 10px', borderRadius:7, border:'1px solid #e2e8f0', fontSize:12, background:'#fff', cursor:'pointer', outline:'none' }}>
+              <option value="all">All Sections</option>
+              {sections.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding:'7px 10px', borderRadius:7, border:'1px solid #e2e8f0', fontSize:12, background:'#fff', cursor:'pointer', outline:'none' }}>
+              <option value="all">All Status</option>
+              <option value="incomplete">Incomplete</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+
+          {/* Selection controls and count */}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <button onClick={selectAll} style={{ padding:'4px 10px', borderRadius:5, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:11, fontWeight:600, color:'#475569' }}>Select All Visible</button>
+              <button onClick={selectNone} style={{ padding:'4px 10px', borderRadius:5, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:11, fontWeight:600, color:'#475569' }}>Select None</button>
+            </div>
+            <div style={{ fontSize:11.5, color:'#64748b' }}>
+              {selected.size} selected · {filtered.length} shown of {tasks.length} total
+            </div>
+          </div>
+
+          {/* Task list */}
+          <div style={{ maxHeight:420, overflowY:'auto', border:'1px solid #e2e8f0', borderRadius:10, background:'#fff' }}>
+            {filtered.length === 0 && (
+              <div style={{ padding:'30px 20px', textAlign:'center', color:'#94a3b8', fontSize:13 }}>No tasks match your filters</div>
+            )}
+            {filtered.map(task => {
+              const isTracked = trackedGids.has(task.gid);
+              const isSelected = selected.has(task.gid);
+              return (
+                <div key={task.gid} style={{
+                  display:'flex', alignItems:'flex-start', gap:10, padding:'10px 14px',
+                  borderBottom:'1px solid #f1f5f9', opacity: isTracked ? 0.45 : 1,
+                  background: isSelected ? '#f0f9ff' : 'transparent', transition:'background 0.1s',
+                  cursor: isTracked ? 'default' : 'pointer',
+                }} onClick={() => { if (!isTracked) toggleTask(task.gid); }}>
+                  <input type="checkbox" checked={isSelected} disabled={isTracked}
+                    onChange={() => { if (!isTracked) toggleTask(task.gid); }}
+                    style={{ marginTop:2, cursor: isTracked ? 'default' : 'pointer', accentColor:'#0f172a' }}
+                  />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12.5, fontWeight:600, color:'#0f172a', marginBottom:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {task.name || 'Untitled'}
+                      {isTracked && <span style={{ fontSize:10, fontWeight:600, marginLeft:8, padding:'1px 6px', borderRadius:4, background:'#f1f5f9', color:'#94a3b8' }}>Already tracked</span>}
+                    </div>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:6, fontSize:10.5, color:'#94a3b8' }}>
+                      {task.section && <span style={{ padding:'1px 6px', borderRadius:3, background:'#f1f5f9', color:'#475569', fontWeight:600 }}>{task.section}</span>}
+                      {task.completed && <span style={{ padding:'1px 6px', borderRadius:3, background:'#dcfce7', color:'#166534', fontWeight:600 }}>Completed</span>}
+                      {task.assignee_name && <span>{task.assignee_name}</span>}
+                      {task.created_at && <span>Created {formatDate(task.created_at)}</span>}
+                    </div>
+                  </div>
+                  {task.permalink_url && (
+                    <a href={task.permalink_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                      style={{ color:'#94a3b8', flexShrink:0, padding:4 }} title="Open in Asana">
+                      <ExternalLink size={12} />
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer actions */}
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:16, paddingTop:14, borderTop:'1px solid #f1f5f9' }}>
+            <div style={{ fontSize:11, color:'#94a3b8' }}>
+              Imported tasks appear in the Asana Tracked tab as historical context.
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={onClose} style={{ padding:'8px 16px', borderRadius:7, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:12, fontWeight:600, color:'#64748b' }}>
+                Close
+              </button>
+              <button onClick={handleImport} disabled={selected.size === 0}
+                style={{
+                  padding:'8px 16px', borderRadius:7, border:'none', cursor: selected.size > 0 ? 'pointer' : 'default',
+                  background: selected.size > 0 ? '#0f172a' : '#e2e8f0',
+                  color: selected.size > 0 ? '#fff' : '#94a3b8',
+                  fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:5,
+                }}>
+                <Download size={12} /> Import {selected.size > 0 ? `${selected.size} Task${selected.size !== 1 ? 's' : ''}` : 'Selected'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -2278,6 +2512,7 @@ export default function ProjectScout() {
   const [showPIFReview, setShowPIFReview] = useState(null);
   const [showNotPursuedDialog, setShowNotPursuedDialog] = useState(null);
   const [pendingAsanaMatches, setPendingAsanaMatches] = useState([]);
+  const [showAsanaImport, setShowAsanaImport] = useState(false);
 
   // ─── Lead CRUD operations ──────────────────────────────────
 
@@ -2388,6 +2623,118 @@ export default function ProjectScout() {
   const dismissAsanaMatch = useCallback((match) => {
     setPendingAsanaMatches(prev => prev.filter(m => m.leadId !== match.leadId));
   }, []);
+
+  // ─── Asana import — fetch tasks for import panel ─────────────
+  const fetchAsanaTasksForImport = useCallback(async () => {
+    const settings = loadState('settings', {});
+    const asanaToken = settings?.asanaToken;
+    const backendUrl = settings?.backendEndpoint;
+
+    // Try backend route first
+    if (backendUrl) {
+      try {
+        const resp = await fetch(`${backendUrl}/api/scan?action=asana-import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ settings }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.ok) return { tasks: data.tasks, error: null };
+          return { tasks: [], error: data.error || 'Backend import failed' };
+        }
+      } catch (err) {
+        // Fall through to browser-direct
+      }
+    }
+
+    // Browser-direct fallback
+    if (!asanaToken) return { tasks: [], error: 'No Asana access token configured. Set in Settings.' };
+    const ASANA_PROJECT = settings?.asanaProjectId || '1203575716271060';
+    try {
+      let tasks = [], offset = null;
+      do {
+        const url = `https://app.asana.com/api/1.0/projects/${ASANA_PROJECT}/tasks?opt_fields=name,permalink_url,created_at,completed,completed_at,assignee.name,notes,memberships.section.name&limit=100${offset ? `&offset=${offset}` : ''}`;
+        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${asanaToken}` } });
+        if (!resp.ok) throw new Error(`Asana API ${resp.status}`);
+        const data = await resp.json();
+        if (data.errors?.length) throw new Error(data.errors[0].message);
+        tasks.push(...(data.data || []));
+        offset = data.next_page?.offset || null;
+      } while (offset);
+      const taskSection = (task) => {
+        const mb = (task.memberships || []).find(m => m.section?.name);
+        return mb ? mb.section.name : null;
+      };
+      const mapped = tasks.map(t => ({
+        gid: t.gid,
+        name: t.name || '',
+        permalink_url: t.permalink_url || '',
+        created_at: t.created_at || null,
+        completed: !!t.completed,
+        completed_at: t.completed_at || null,
+        assignee_name: t.assignee?.name || null,
+        section: taskSection(t),
+        notes_excerpt: t.notes ? t.notes.slice(0, 300) : null,
+      }));
+      return { tasks: mapped, error: null };
+    } catch (err) {
+      return { tasks: [], error: err.message };
+    }
+  }, []);
+
+  const importAsanaTasks = useCallback((selectedTasks) => {
+    // Build set of already-tracked Asana task IDs and titles for dedup
+    const existingGids = new Set(submittedLeads.filter(l => l.asana_task_id).map(l => l.asana_task_id));
+    const existingTitles = new Set(submittedLeads.map(l => l.title?.toLowerCase().trim()).filter(Boolean));
+
+    const now = new Date().toISOString();
+    const newEntries = [];
+    let dupeCount = 0;
+
+    for (const task of selectedTasks) {
+      // Dedup check
+      if (task.gid && existingGids.has(task.gid)) { dupeCount++; continue; }
+      if (existingTitles.has(task.name?.toLowerCase().trim())) { dupeCount++; continue; }
+
+      newEntries.push({
+        id: `lead-asana-${task.gid || Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        title: task.name || 'Untitled Asana Task',
+        status: LEAD_STATUS.SUBMITTED_TO_ASANA,
+        tracking_origin: 'imported_from_asana',
+        dateSubmittedToAsana: now,
+        asanaUrl: task.permalink_url || '',
+        submissionNotes: 'Imported from Asana board history. Not a Scout-discovered lead.',
+        // Asana context
+        asana_task_id: task.gid || null,
+        asana_task_name: task.name || '',
+        asana_synced_at: now,
+        asana_created_at: task.created_at || null,
+        asana_completed: !!task.completed,
+        asana_completed_at: task.completed_at || null,
+        asana_assignee: task.assignee_name || null,
+        asana_section: task.section || null,
+        asana_notes_excerpt: task.notes_excerpt || null,
+        // Default lead fields
+        owner: '',
+        location: '',
+        marketSector: '',
+        projectType: '',
+        description: task.notes_excerpt || '',
+        relevanceScore: 0,
+        pursuitScore: 0,
+        sourceConfidenceScore: 0,
+        dateDiscovered: task.created_at || now,
+        leadOrigin: 'asana_import',
+        evidence: [],
+      });
+    }
+
+    if (newEntries.length > 0) {
+      setSubmittedLeads(prev => [...newEntries, ...prev]);
+    }
+    return { imported: newEntries.length, skipped: dupeCount };
+  }, [submittedLeads]);
 
   // ─── Asana check — prefers backend route, falls back to browser-direct ────
   const runAsanaCheck = useCallback(async (settings, addLog) => {
@@ -2667,7 +3014,7 @@ export default function ProjectScout() {
         </div>
 
         {activeTab === 'active' && <ActiveLeadsTab leads={leads} onSelectLead={handleSelectLead} />}
-        {activeTab === 'asana' && <SubmittedTab leads={submittedLeads} onSelectLead={handleSelectLead} />}
+        {activeTab === 'asana' && <SubmittedTab leads={submittedLeads} onSelectLead={handleSelectLead} onImport={() => setShowAsanaImport(true)} />}
         {activeTab === 'notpursued' && <NotPursuedTab leads={notPursuedLeads} onSelectLead={handleSelectLead} onRestore={restoreFromNotPursued} />}
         {activeTab === 'registry' && <SourceRegistryView />}
         {activeTab === 'settings' && <SettingsTab onMergeResults={mergeEngineResults} onRunAsanaCheck={runAsanaCheck} allLeads={leads} notPursuedLeads={notPursuedLeads} submittedLeads={submittedLeads} />}
@@ -2785,6 +3132,16 @@ export default function ProjectScout() {
             </div>
           )}
         </Modal>
+      )}
+
+      {/* ─── ASANA IMPORT MODAL ─── */}
+      {showAsanaImport && (
+        <AsanaImportModal
+          onClose={() => setShowAsanaImport(false)}
+          onFetch={fetchAsanaTasksForImport}
+          onImport={importAsanaTasks}
+          existingGids={submittedLeads.filter(l => l.asana_task_id).map(l => l.asana_task_id)}
+        />
       )}
     </div>
   );

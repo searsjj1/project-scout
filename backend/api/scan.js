@@ -183,6 +183,43 @@ export default async function handler(req, res) {
         keywords: kw, leads, logs, ts: new Date().toISOString() });
     }
 
+    // ── ASANA IMPORT — fetch all tasks for import panel ─────
+    if (action === 'asana-import') {
+      const token = body.settings?.asanaToken || process.env.ASANA_ACCESS_TOKEN;
+      if (!token) {
+        return res.status(200).json({ ok: false, error: 'No Asana access token configured.', logs, ts: new Date().toISOString() });
+      }
+      const proj = body.settings?.asanaProjectId || process.env.ASANA_PROJECT_ID || '1203575716271060';
+      log(`Asana import: fetching all tasks from project ${proj}...`);
+      let tasks = [], offset = null;
+      do {
+        const u = `https://app.asana.com/api/1.0/projects/${proj}/tasks?opt_fields=name,permalink_url,created_at,completed,completed_at,assignee.name,notes,memberships.section.name&limit=100${offset?`&offset=${offset}`:''}`;
+        const r = await fetch(u, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (!r.ok) { const t = await r.text(); throw new Error(`Asana HTTP ${r.status}: ${t.slice(0,200)}`); }
+        const d = await r.json();
+        if (d.errors?.length) throw new Error(d.errors[0].message);
+        tasks.push(...(d.data||[]));
+        offset = d.next_page?.offset || null;
+      } while (offset);
+      log(`Asana import: ${tasks.length} tasks fetched`);
+      const taskSection = (task) => {
+        const m = (task.memberships || []).find(mb => mb.section?.name);
+        return m ? m.section.name : null;
+      };
+      const mapped = tasks.map(t => ({
+        gid: t.gid,
+        name: t.name || '',
+        permalink_url: t.permalink_url || '',
+        created_at: t.created_at || null,
+        completed: !!t.completed,
+        completed_at: t.completed_at || null,
+        assignee_name: t.assignee?.name || null,
+        section: taskSection(t),
+        notes_excerpt: t.notes ? t.notes.slice(0, 300) : null,
+      }));
+      return res.status(200).json({ ok:true, tasks:mapped, count:mapped.length, logs, ts:new Date().toISOString() });
+    }
+
     // ── ASANA CHECK ─────────────────────────────────────────
     if (action === 'asana') {
       const token = body.settings?.asanaToken || process.env.ASANA_ACCESS_TOKEN;
