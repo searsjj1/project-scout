@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "backend/api/**/*.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/backend/api/$1.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+      }
+    },
+    {
+      "src": "/api/(.*)",
+      "methods": ["OPTIONS"],
+      "dest": "/backend/api/$1.js"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/scan?action=daily",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}
