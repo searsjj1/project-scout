@@ -14,6 +14,10 @@ export function runMigration() {
   try {
     const settings = storageGet(KEYS.SETTINGS);
     if (settings && settings.schema_version === SCHEMA_VERSION) {
+      // Schema current — check if seed data has been updated (e.g. new batch of sources)
+      if (settings.seed_version !== SEED_VERSION) {
+        return runSeedUpdate(settings, notes);
+      }
       return { status: 'current', notes: ['Schema v2 active. No migration needed.'] };
     }
 
@@ -142,4 +146,65 @@ function writeMigrationLog(wasV1, notes) {
     seed_version: SEED_VERSION,
     notes,
   });
+}
+
+/* ── Seed Update (same schema, new seed data) ───────────────────── */
+function runSeedUpdate(settings, notes) {
+  try {
+    notes.push(`Seed update: ${settings.seed_version} → ${SEED_VERSION}`);
+
+    // Reference tables — always safe to overwrite (user doesn't edit these)
+    setTable(KEYS.SOURCE_FAMILIES, SEED_SOURCE_FAMILIES);
+    notes.push(`Refreshed ${SEED_SOURCE_FAMILIES.length} source families.`);
+    setTable(KEYS.COVERAGE_REGIONS, SEED_COVERAGE_REGIONS);
+    notes.push(`Refreshed ${SEED_COVERAGE_REGIONS.length} coverage regions.`);
+
+    // Data tables — merge new records without overwriting existing edits
+    mergeNewRecords(KEYS.ENTITIES, SEED_ENTITIES, 'entity_id', 'entities', notes);
+    mergeNewRecords(KEYS.SOURCES, SEED_SOURCES, 'source_id', 'sources', notes);
+    mergeCountyMappings(notes);
+
+    // Update seed_version in settings
+    settings.seed_version = SEED_VERSION;
+    storageSet(KEYS.SETTINGS, settings);
+
+    // Log the update
+    storageSet(KEYS.MIGRATION, {
+      migrated_at: new Date().toISOString(),
+      from_version: SCHEMA_VERSION,
+      to_version: SCHEMA_VERSION,
+      seed_version: SEED_VERSION,
+      notes,
+    });
+
+    return { status: 'seed_updated', notes };
+  } catch (err) {
+    console.error('[PS Seed Update]', err);
+    notes.push('ERROR during seed update: ' + err.message);
+    return { status: 'error', notes };
+  }
+}
+
+function mergeNewRecords(key, seedRecords, idField, label, notes) {
+  const existing = getTable(key);
+  const existingIds = new Set(existing.map(r => r[idField]));
+  const newRecords = seedRecords.filter(r => !existingIds.has(r[idField]));
+  if (newRecords.length > 0) {
+    setTable(key, [...existing, ...newRecords]);
+    notes.push(`Added ${newRecords.length} new ${label}.`);
+  } else {
+    notes.push(`No new ${label} to add.`);
+  }
+}
+
+function mergeCountyMappings(notes) {
+  const existing = getTable(KEYS.COUNTY_MAPPING);
+  const existingKeys = new Set(existing.map(c => `${c.county_name}|${c.state}`));
+  const newMappings = SEED_COUNTY_MAPPING.filter(c => !existingKeys.has(`${c.county_name}|${c.state}`));
+  if (newMappings.length > 0) {
+    setTable(KEYS.COUNTY_MAPPING, [...existing, ...newMappings]);
+    notes.push(`Added ${newMappings.length} new county mappings.`);
+  } else {
+    notes.push('No new county mappings to add.');
+  }
 }
