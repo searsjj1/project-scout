@@ -2132,6 +2132,7 @@ export default function ProjectScout() {
   const [showAddLead, setShowAddLead] = useState(false);
   const [showPIFReview, setShowPIFReview] = useState(null);
   const [showNotPursuedDialog, setShowNotPursuedDialog] = useState(null);
+  const [pendingAsanaMatches, setPendingAsanaMatches] = useState([]);
 
   // ─── Lead CRUD operations ──────────────────────────────────
 
@@ -2206,6 +2207,28 @@ export default function ProjectScout() {
     setShowPIFReview(null);
   }, []);
 
+  // ─── Asana match review actions ─────────────────────────────
+  const confirmAsanaMatch = useCallback((match) => {
+    setLeads(prev => {
+      const lead = prev.find(l => l.id === match.leadId);
+      if (lead) {
+        setSubmittedLeads(sub => [{
+          ...lead,
+          status: LEAD_STATUS.SUBMITTED_TO_ASANA,
+          dateSubmittedToAsana: new Date().toISOString(),
+          asanaUrl: match.taskUrl || '',
+          submissionNotes: `Confirmed Asana match (${match.matchType}, ${Math.round((match.confidence||0)*100)}%). Matched task: "${match.taskName}".`,
+        }, ...sub]);
+      }
+      return prev.filter(l => l.id !== match.leadId);
+    });
+    setPendingAsanaMatches(prev => prev.filter(m => m.leadId !== match.leadId));
+  }, []);
+
+  const dismissAsanaMatch = useCallback((match) => {
+    setPendingAsanaMatches(prev => prev.filter(m => m.leadId !== match.leadId));
+  }, []);
+
   // ─── Asana check — prefers backend route, falls back to browser-direct ────
   const runAsanaCheck = useCallback(async (settings, addLog) => {
     const log = addLog || (() => {});
@@ -2233,28 +2256,24 @@ export default function ProjectScout() {
         if (data.logs) data.logs.forEach(l => log(l));
         if (!data.ok) throw new Error(data.error || 'Backend Asana check failed');
 
-        // Process matches — move matched leads to Submitted
-        const matchIds = new Set((data.matches || []).map(m => m.leadId));
-        if (matchIds.size > 0) {
-          setLeads(prev => {
-            const remaining = [];
-            for (const lead of prev) {
-              const match = (data.matches || []).find(m => m.leadId === lead.id);
-              if (match) {
-                log(`  ✓ MATCH: "${lead.title}" → "${match.taskName}" (${match.matchType}, ${Math.round((match.confidence||0)*100)}%)`);
-                setSubmittedLeads(sub => [{
-                  ...lead,
-                  status: LEAD_STATUS.SUBMITTED_TO_ASANA,
-                  dateSubmittedToAsana: new Date().toISOString(),
-                  asanaUrl: match.taskUrl || match.url || '',
-                  submissionNotes: `Auto-matched via backend Asana check (${match.matchType}, ${Math.round((match.confidence||0)*100)}% confidence).`,
-                }, ...sub]);
-              } else {
-                remaining.push(lead);
-              }
+        // Store matches for human review — do NOT auto-move
+        if ((data.matches || []).length > 0) {
+          const pending = [];
+          for (const match of data.matches) {
+            const lead = leads.find(l => l.id === match.leadId);
+            if (lead) {
+              log(`  ? PENDING REVIEW: "${lead.title}" → "${match.taskName}" (${match.matchType}, ${Math.round((match.confidence||0)*100)}%)`);
+              pending.push({
+                leadId: lead.id,
+                leadTitle: lead.title,
+                taskName: match.taskName,
+                taskUrl: match.taskUrl || match.url || '',
+                matchType: match.matchType || 'unknown',
+                confidence: match.confidence || 0,
+              });
             }
-            return remaining;
-          });
+          }
+          if (pending.length > 0) setPendingAsanaMatches(pending);
         }
 
         const result = { matched: data.matches?.length || 0, tasksChecked: data.tasks || 0, mode: 'connected', timestamp: new Date().toISOString() };
@@ -2301,25 +2320,27 @@ export default function ProjectScout() {
       };
 
       const matched = [];
-      setLeads(prev => {
-        const remaining = [];
-        for (const lead of prev) {
-          let found = null;
-          for (const task of tasks) {
-            const na = normalize(lead.title), nb = normalize(task.name);
-            if (na===nb || nb.includes(na) || na.includes(nb)) { found = { task, confidence:0.95, matchType:'exact' }; break; }
-            const s = wordSim(lead.title, task.name);
-            if (s > 0.5) { found = { task, confidence:s, matchType:'fuzzy' }; break; }
-          }
-          if (found) {
-            matched.push({ lead, ...found });
-            log(`  ✓ MATCH: "${lead.title}" → "${found.task.name}" (${found.matchType})`);
-            setSubmittedLeads(sub => [{ ...lead, status:LEAD_STATUS.SUBMITTED_TO_ASANA, dateSubmittedToAsana:new Date().toISOString(),
-              asanaUrl: found.task.permalink_url||'', submissionNotes:`Auto-matched (${found.matchType}, ${Math.round(found.confidence*100)}%).` }, ...sub]);
-          } else { remaining.push(lead); }
+      for (const lead of leads) {
+        let found = null;
+        for (const task of tasks) {
+          const na = normalize(lead.title), nb = normalize(task.name);
+          if (na===nb || nb.includes(na) || na.includes(nb)) { found = { task, confidence:0.95, matchType:'exact' }; break; }
+          const s = wordSim(lead.title, task.name);
+          if (s > 0.5) { found = { task, confidence:s, matchType:'fuzzy' }; break; }
         }
-        return remaining;
-      });
+        if (found) {
+          matched.push({
+            leadId: lead.id,
+            leadTitle: lead.title,
+            taskName: found.task.name,
+            taskUrl: found.task.permalink_url || '',
+            matchType: found.matchType,
+            confidence: found.confidence,
+          });
+          log(`  ? PENDING REVIEW: "${lead.title}" → "${found.task.name}" (${found.matchType})`);
+        }
+      }
+      if (matched.length > 0) setPendingAsanaMatches(matched);
 
       const result = { matched: matched.length, tasksChecked: tasks.length, mode: 'browser-direct', timestamp: new Date().toISOString() };
       log(`═══ ASANA CHECK COMPLETE — ${matched.length} match(es) ═══`);
@@ -2331,7 +2352,7 @@ export default function ProjectScout() {
       saveState('lastAsanaCheck', result);
       return result;
     }
-  }, [leads, setLeads, setSubmittedLeads]);
+  }, [leads]);
 
   // ─── Engine merge callback — called by SettingsTab to merge engine results into persisted state ───
   const mergeEngineResults = useCallback((results) => {
@@ -2517,6 +2538,62 @@ export default function ProjectScout() {
             </div>
           </div>
         </>
+      )}
+
+      {/* ─── ASANA MATCH REVIEW MODAL ─── */}
+      {pendingAsanaMatches.length > 0 && (
+        <Modal title={`Review Asana Matches (${pendingAsanaMatches.length})`} onClose={() => setPendingAsanaMatches([])} width={620}>
+          <p style={{ fontSize:13, color:'#475569', lineHeight:1.6, margin:'0 0 4px' }}>
+            The Asana board check found leads that may already exist in Asana. Review each match below and decide whether to confirm or keep the lead in Active / Watch.
+          </p>
+          <p style={{ fontSize:11.5, color:'#94a3b8', margin:'0 0 16px' }}>
+            Confirming a match marks the lead as tracked in Asana. It does not mean the lead was submitted by you.
+          </p>
+          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+            {pendingAsanaMatches.map(match => (
+              <div key={match.leadId} style={{ border:'1px solid #e2e8f0', borderRadius:10, padding:'14px 16px', background:'#fafbfc' }}>
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:'#0f172a', marginBottom:4 }}>{match.leadTitle}</div>
+                  <div style={{ fontSize:12, color:'#475569', display:'flex', alignItems:'center', gap:6 }}>
+                    <ArrowRight size={11} style={{ color:'#94a3b8', flexShrink:0 }} />
+                    <span>Asana task: <strong>{match.taskName}</strong></span>
+                  </div>
+                  <div style={{ display:'flex', gap:8, marginTop:6 }}>
+                    <span style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background: match.matchType === 'exact' ? '#d1fae5' : '#fef3c7', color: match.matchType === 'exact' ? '#065f46' : '#92400e' }}>
+                      {match.matchType === 'exact' ? 'Exact match' : 'Fuzzy match'}
+                    </span>
+                    <span style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#f1f5f9', color:'#475569' }}>
+                      {Math.round((match.confidence||0)*100)}% confidence
+                    </span>
+                    {match.taskUrl && (
+                      <a href={match.taskUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#ede9fe', color:'#5b21b6', textDecoration:'none', display:'flex', alignItems:'center', gap:3 }}>
+                        <ExternalLink size={9}/> View in Asana
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+                  <button onClick={() => dismissAsanaMatch(match)} style={{ padding:'7px 14px', borderRadius:6, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:12, fontWeight:600, color:'#64748b' }}>
+                    Keep in Active
+                  </button>
+                  <button onClick={() => confirmAsanaMatch(match)} style={{ padding:'7px 14px', borderRadius:6, border:'none', background:'#0f172a', cursor:'pointer', fontSize:12, fontWeight:600, color:'#fff', display:'flex', alignItems:'center', gap:4 }}>
+                    <CheckCircle2 size={12}/> Confirm Match
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {pendingAsanaMatches.length > 1 && (
+            <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:16, paddingTop:14, borderTop:'1px solid #f1f5f9' }}>
+              <button onClick={() => setPendingAsanaMatches([])} style={{ padding:'8px 16px', borderRadius:7, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:12, fontWeight:600, color:'#64748b' }}>
+                Dismiss All
+              </button>
+              <button onClick={() => { pendingAsanaMatches.forEach(m => confirmAsanaMatch(m)); }} style={{ padding:'8px 16px', borderRadius:7, border:'none', background:'#0f172a', cursor:'pointer', fontSize:12, fontWeight:600, color:'#fff' }}>
+                Confirm All
+              </button>
+            </div>
+          )}
+        </Modal>
       )}
     </div>
   );
