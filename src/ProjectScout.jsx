@@ -2118,9 +2118,9 @@ export default function ProjectScout() {
   }, []);
 
   // ─── Centralized lead state (persisted) ────────────────────
-  const [leads, setLeads] = useState(() => loadState('leads', [...seedLeads]));
-  const [submittedLeads, setSubmittedLeads] = useState(() => loadState('submitted', [...seedSubmitted]));
-  const [notPursuedLeads, setNotPursuedLeads] = useState(() => loadState('notpursued', [...seedNotPursued]));
+  const [leads, setLeads] = useState(() => loadState('leads', []));
+  const [submittedLeads, setSubmittedLeads] = useState(() => loadState('submitted', []));
+  const [notPursuedLeads, setNotPursuedLeads] = useState(() => loadState('notpursued', []));
 
   // Persist on every change
   useEffect(() => { saveState('leads', leads); }, [leads]);
