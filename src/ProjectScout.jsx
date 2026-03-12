@@ -1576,11 +1576,11 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
     addLog(`AI: ${hasAIKey ? 'Configured (' + settings.aiProvider + ') — will classify if backend available' : 'Not configured — rule-based scoring only'}`);
 
     // Load current persisted data
-    const currentSources = JSON.parse(localStorage.getItem('ps_sources') || JSON.stringify(INIT_SOURCES));
-    const currentFP = JSON.parse(localStorage.getItem('ps_focuspoints') || JSON.stringify(INIT_FOCUS_POINTS));
-    const currentOrgs = JSON.parse(localStorage.getItem('ps_targetorgs') || JSON.stringify(INIT_TARGET_ORGS));
-    const activeSources = currentSources.filter(s => s.state === 'active');
+    const currentSources = JSON.parse(localStorage.getItem('ps_sources') || '[]');
+    const activeSources = currentSources.filter(s => s.active !== false);
+    const currentFP = JSON.parse(localStorage.getItem('ps_focuspoints') || '[]');
     const activeFP = currentFP.filter(f => f.active);
+    const currentOrgs = JSON.parse(localStorage.getItem('ps_targetorgs') || '[]');
     const activeOrgs = currentOrgs.filter(o => o.active);
 
     try {
@@ -1588,6 +1588,11 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
 
       if (isConnected) {
         // ─── CONNECTED MODE: call real backend ────────────────
+        if (activeSources.length === 0) {
+          addLog('⚠ No active sources found in Source Registry. Add sources in the Source Registry tab before running the engine.');
+          setEngineState('complete');
+          return;
+        }
         addLog(`Sending request to backend (${activeSources.length} sources, ${allLeads.length} existing leads)...`);
         const resp = await fetch(`${settings.backendEndpoint}/api/scan?action=${action}`, {
           method: 'POST',
@@ -1604,6 +1609,11 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
         results = data.results;
       } else {
         // ─── LOCAL MODE: client-side rule-based engine ────────
+        if (activeSources.length === 0) {
+          addLog('⚠ No active sources in Source Registry. Add sources first.');
+          setEngineState('complete');
+          return;
+        }
         results = await runLocalEngine(action, activeSources, activeFP, activeOrgs, allLeads, notPursuedLeads, submittedLeads, settings, addLog);
       }
 
