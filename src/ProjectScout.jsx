@@ -2026,7 +2026,7 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
       addLog(`ERROR: ${err.message}`);
       setEngineState('error');
     }
-  }, [settings, hasBackend, hasAIKey, allLeads, notPursuedLeads, submittedLeads, onMergeResults, addLog, runHistory]);
+  }, [settings, hasBackend, allLeads, notPursuedLeads, submittedLeads, onMergeResults, addLog, runHistory]);
 
   // ─── Asana check via parent callback ───────────────────────
   const handleAsanaCheck = useCallback(async () => {
@@ -2163,7 +2163,7 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
             <div>
               <div style={{ fontSize:12.5, fontWeight:600, color:'#475569' }}>
-                {hasAsanaToken ? 'Connected to Asana' : 'Asana token not configured'}
+                {hasBackend ? 'Asana checks via backend' : 'Backend not configured'}
               </div>
               {lastAsanaCheck && (
                 <div style={{ fontSize:11, color:'#94a3b8', marginTop:2 }}>
@@ -2172,14 +2172,14 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
                 </div>
               )}
             </div>
-            <button onClick={handleAsanaCheck} disabled={engineState === 'running'}
-              style={{ padding:'7px 16px', borderRadius:7, border:'none', background: hasAsanaToken ? '#0f172a' : '#e2e8f0', color: hasAsanaToken ? '#fff' : '#94a3b8', cursor: hasAsanaToken && engineState !== 'running' ? 'pointer' : 'not-allowed', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:5 }}>
+            <button onClick={handleAsanaCheck} disabled={!hasBackend || engineState === 'running'}
+              style={{ padding:'7px 16px', borderRadius:7, border:'none', background: hasBackend ? '#0f172a' : '#e2e8f0', color: hasBackend ? '#fff' : '#94a3b8', cursor: hasBackend && engineState !== 'running' ? 'pointer' : 'not-allowed', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:5 }}>
               <Search size={12}/> Check Asana Now
             </button>
           </div>
-          {!hasAsanaToken && (
+          {!hasBackend && (
             <div style={{ padding:'10px 12px', background:'#fffbeb', borderRadius:7, border:'1px solid #fef3c7', fontSize:11.5, color:'#92400e', lineHeight:1.5 }}>
-              Configure your Asana personal access token in the Asana Integration section below to enable daily board checking. Without a token, this check cannot run.
+              Configure a Backend Endpoint above to enable Asana board checking. The Asana access token is managed as an environment variable on the backend.
             </div>
           )}
         </div>
