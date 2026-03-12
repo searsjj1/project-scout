@@ -238,11 +238,25 @@ export default async function handler(req, res) {
     const { sources, focusPoints, targetOrgs, existingLeads, notPursuedLeads, settings } = body;
     if (!sources?.length) return res.status(400).json({ error: 'body.sources required (array)' });
 
-    const active = sources.filter(s => s.state === 'active');
-    const list = action === 'daily' ? active.slice(0, 15) : active;
+    const active = sources.filter(s => s.active !== false);
+
+    // Normalize V2 source fields to what the engine expects
+    const normalize = (src) => ({
+      ...src,
+      name: src.source_name || src.name || '',
+      url: src.source_url || src.url || '',
+      id: src.source_id || src.id || '',
+      keywords: src.keywords_to_watch || src.keywords || [],
+      category: src.source_family || src.category || '',
+      priority: src.priority_tier || src.priority || 'medium',
+      organization: src.entity_id || src.organization || '',
+    });
+    const activeNorm = active.map(normalize);
+
+    const list = action === 'daily' ? activeNorm.slice(0, 15) : activeNorm;
     const freshDays = settings?.freshnessDays || 60;
 
-    log(`═══ ${action.toUpperCase()} — ${list.length} of ${active.length} active sources ═══`);
+    log(`═══ ${action.toUpperCase()} — ${list.length} of ${activeNorm.length} active sources ═══`);
 
     const allEx = [...(existingLeads||[]), ...(notPursuedLeads||[])];
     const npSet = new Set((notPursuedLeads||[]).map(l => (l.title||'').toLowerCase().trim()));
