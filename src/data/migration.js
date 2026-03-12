@@ -77,8 +77,8 @@ function backupAndDelete(srcKey, dstKey, notes) {
 function migrateSettings(v1Settings, notes) {
   const merged = freshSettings();
   if (v1Settings) {
-    // Preserve user-entered values
-    ['aiProvider','aiModel','aiApiKey','backendEndpoint','asanaToken',
+    // Preserve user-entered values (secrets excluded — managed server-side)
+    ['aiProvider','aiModel','backendEndpoint',
      'dailyUpdateTime','freshnessDays','recheckDays'].forEach(k => {
       if (v1Settings[k] !== undefined && v1Settings[k] !== '') merged[k] = v1Settings[k];
     });
@@ -91,8 +91,8 @@ function freshSettings() {
   return {
     schema_version: SCHEMA_VERSION,
     seed_version: SEED_VERSION,
-    aiProvider: 'anthropic', aiModel: '', aiApiKey: '', backendEndpoint: '',
-    asanaToken: '', asanaWorkspaceId: '869158886664904', asanaProjectId: '1203575716271060',
+    aiProvider: 'anthropic', aiModel: '', backendEndpoint: '',
+    asanaWorkspaceId: '869158886664904', asanaProjectId: '1203575716271060',
     dailyUpdateTime: '06:00', backfillMonths: 6, freshnessDays: 60, recheckDays: 7,
     activeSourcesOnly: true, priorityThreshold: 'low',
   };

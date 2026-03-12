@@ -1888,8 +1888,8 @@ function OrgEditModal({ org, onSave, onClose }) {
 function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLeads, submittedLeads }) {
   const loadS = (k, fb) => { try { const d = localStorage.getItem(`ps_${k}`); return d ? JSON.parse(d) : fb; } catch { return fb; } };
   const [settings, setSettings] = useState(() => loadS('settings', {
-    aiProvider: 'anthropic', aiModel: '', aiApiKey: '', backendEndpoint: '',
-    asanaToken: '', dailyUpdateTime: '06:00',
+    aiProvider: 'anthropic', aiModel: '', backendEndpoint: '',
+    dailyUpdateTime: '06:00',
     backfillMonths: 6, freshnessDays: 60, recheckDays: 7,
     activeSourcesOnly: true, priorityThreshold: 'low',
   }));
@@ -1916,8 +1916,6 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
 
   // ─── Connection status ─────────────────────────────────────
   const hasBackend = !!settings.backendEndpoint;
-  const hasAIKey = !!settings.aiApiKey;
-  const hasAsanaToken = !!settings.asanaToken;
 
   // ─── Real client-side engine (uses scoring/dedup logic, merges results) ─
   const runEngine = useCallback(async (action) => {
@@ -1929,7 +1927,7 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
     const isConnected = hasBackend;
     addLog(`═══ ${action.toUpperCase()} INITIATED ═══`);
     addLog(`Mode: ${isConnected ? 'LIVE — real source fetching via backend at ' + settings.backendEndpoint : 'FALLBACK — metadata-based lead generation (no live fetch). Deploy backend for live scouting.'}`);
-    addLog(`AI: ${hasAIKey ? 'Configured (' + settings.aiProvider + ') — will classify if backend available' : 'Not configured — rule-based scoring only'}`);
+    addLog(`AI: ${isConnected ? 'Backend handles AI classification (' + (settings.aiProvider || 'anthropic') + ')' : 'Not available — rule-based scoring only (no backend)'}`);
 
     // Load current persisted data
     const currentSources = JSON.parse(localStorage.getItem('ps_sources') || '[]');
@@ -1976,13 +1974,15 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
           return;
         }
         addLog(`Sending request to backend (${sourcesForScan.length} source${sourcesForScan.length === 1 ? '' : 's'}, ${allLeads.length} existing leads)...`);
+        // Send only safe preferences — backend uses its own env vars for secrets
+        const safeSettings = { aiProvider: settings.aiProvider, aiModel: settings.aiModel, freshnessDays: settings.freshnessDays, recheckDays: settings.recheckDays, backfillMonths: settings.backfillMonths };
         const resp = await fetch(`${settings.backendEndpoint}/api/scan?action=${action}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sources: sourcesForScan, focusPoints: activeFP, targetOrgs: activeOrgs,
             existingLeads: allLeads, notPursuedLeads: notPursuedLeads,
-            settings,
+            settings: safeSettings,
           }),
         });
         if (!resp.ok) throw new Error(`Backend returned ${resp.status}: ${await resp.text().then(t=>t.slice(0,200))}`);
@@ -2041,15 +2041,13 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
   }, [settings, onRunAsanaCheck, addLog]);
 
   const groups = [
-    { title: 'AI Configuration', fields: [
-      { key: 'aiProvider', label: 'AI Provider', type: 'select', options: ['anthropic', 'openai'] },
-      { key: 'aiModel', label: 'Model Name', type: 'text', placeholder: 'Default: claude-haiku-4-5 / gpt-4o-mini' },
-      { key: 'aiApiKey', label: 'API Key', type: 'password', placeholder: 'sk-... or anthropic key' },
+    { title: 'Backend Connection', fields: [
       { key: 'backendEndpoint', label: 'Backend Endpoint', type: 'text', placeholder: 'https://your-app.vercel.app' },
-    ]},
-    { title: 'Asana Integration', fields: [
-      { key: 'asanaToken', label: 'Access Token', type: 'password', placeholder: 'Asana personal access token' },
-    ]},
+    ], note: 'AI keys and Asana tokens are managed as environment variables on the backend (Vercel). No secrets need to be stored in the browser.' },
+    { title: 'AI Preferences', fields: [
+      { key: 'aiProvider', label: 'Preferred Provider', type: 'select', options: ['anthropic', 'openai'] },
+      { key: 'aiModel', label: 'Preferred Model', type: 'text', placeholder: 'Default: claude-haiku-4-5 / gpt-4o-mini' },
+    ], note: 'These preferences are sent to the backend. The actual API key is stored server-side.' },
     { title: 'Scheduling & Behavior', fields: [
       { key: 'dailyUpdateTime', label: 'Daily Update Time', type: 'time' },
       { key: 'backfillMonths', label: 'Backfill Window (months)', type: 'number' },
@@ -2077,17 +2075,15 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
     );
   };
 
-  const backendStatus = hasBackend ? 'configured' : 'fallback';
-  const aiStatus = hasAIKey ? 'configured' : 'unavailable';
-  const asanaStatus = hasAsanaToken ? 'configured' : 'unavailable';
+  const backendStatus = hasBackend ? 'configured' : 'unavailable';
 
   return (
     <div style={{ maxWidth: 720 }}>
       {/* Connection Status Bar */}
       <div style={{ display:'flex', gap:8, marginBottom:20, flexWrap:'wrap' }}>
         <ConnBadge status={backendStatus} label="Backend" />
-        <ConnBadge status={aiStatus} label="AI Provider" />
-        <ConnBadge status={asanaStatus} label="Asana" />
+        {hasBackend && <ConnBadge status="configured" label="AI & Asana" />}
+        {!hasBackend && <span style={{ fontSize: 11, color: '#94a3b8', alignSelf: 'center' }}>Configure backend endpoint to enable AI scanning and Asana integration</span>}
       </div>
 
       {/* Intelligence Engine Panel */}
@@ -2238,6 +2234,7 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
               </div>
             ))}
           </div>
+          {g.note && <p style={{ fontSize: 11, color: '#94a3b8', margin: '8px 0 0', lineHeight: 1.5, fontStyle: 'italic' }}>{g.note}</p>}
         </div>
       ))}
       {/* ─── Data Backup & Restore ─────────────────────────────── */}
@@ -2271,8 +2268,17 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
                     if (Array.isArray(payload[k])) totalRecords += payload[k].length;
                   }
                 }
+                // Redact secrets from exported settings — backend env vars are authoritative
+                if (payload.ps_settings && typeof payload.ps_settings === 'object') {
+                  const redacted = { ...payload.ps_settings };
+                  delete redacted.aiApiKey;
+                  delete redacted.asanaToken;
+                  redacted._notice = 'Secrets (AI keys, Asana tokens) are not included in exports. They are managed as backend environment variables.';
+                  payload.ps_settings = redacted;
+                }
                 payload._meta.keysExported = Object.keys(payload).filter(k => k !== '_meta').length;
                 payload._meta.totalRecords = totalRecords;
+                payload._meta.secretsRedacted = true;
                 const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -2772,60 +2778,27 @@ export default function ProjectScout() {
     setPendingAsanaMatches(prev => prev.filter(m => m.leadId !== match.leadId));
   }, []);
 
-  // ─── Asana import — fetch tasks for import panel ─────────────
+  // ─── Asana import — fetch tasks via backend ─────────────
   const fetchAsanaTasksForImport = useCallback(async () => {
     const settings = loadState('settings', {});
-    const asanaToken = settings?.asanaToken;
     const backendUrl = settings?.backendEndpoint;
 
-    // Try backend route first
-    if (backendUrl) {
-      try {
-        const resp = await fetch(`${backendUrl}/api/scan?action=asana-import`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ settings }),
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.ok) return { tasks: data.tasks, error: null };
-          return { tasks: [], error: data.error || 'Backend import failed' };
-        }
-      } catch (err) {
-        // Fall through to browser-direct
-      }
+    if (!backendUrl) {
+      return { tasks: [], error: 'Backend endpoint not configured. Set it in Settings to use Asana features.' };
     }
 
-    // Browser-direct fallback
-    if (!asanaToken) return { tasks: [], error: 'No Asana access token configured. Set in Settings.' };
-    const ASANA_PROJECT = settings?.asanaProjectId || '1203575716271060';
     try {
-      let tasks = [], offset = null;
-      do {
-        const url = `https://app.asana.com/api/1.0/projects/${ASANA_PROJECT}/tasks?opt_fields=name,permalink_url,created_at,completed,completed_at,assignee.name,notes,memberships.section.name&limit=100${offset ? `&offset=${offset}` : ''}`;
-        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${asanaToken}` } });
-        if (!resp.ok) throw new Error(`Asana API ${resp.status}`);
+      const resp = await fetch(`${backendUrl}/api/scan?action=asana-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: {} }),
+      });
+      if (resp.ok) {
         const data = await resp.json();
-        if (data.errors?.length) throw new Error(data.errors[0].message);
-        tasks.push(...(data.data || []));
-        offset = data.next_page?.offset || null;
-      } while (offset);
-      const taskSection = (task) => {
-        const mb = (task.memberships || []).find(m => m.section?.name);
-        return mb ? mb.section.name : null;
-      };
-      const mapped = tasks.map(t => ({
-        gid: t.gid,
-        name: t.name || '',
-        permalink_url: t.permalink_url || '',
-        created_at: t.created_at || null,
-        completed: !!t.completed,
-        completed_at: t.completed_at || null,
-        assignee_name: t.assignee?.name || null,
-        section: taskSection(t),
-        notes_excerpt: t.notes ? t.notes.slice(0, 300) : null,
-      }));
-      return { tasks: mapped, error: null };
+        if (data.ok) return { tasks: data.tasks, error: null };
+        return { tasks: [], error: data.error || 'Backend Asana import failed' };
+      }
+      return { tasks: [], error: `Backend returned HTTP ${resp.status}` };
     } catch (err) {
       return { tasks: [], error: err.message };
     }
@@ -2884,139 +2857,59 @@ export default function ProjectScout() {
     return { imported: newEntries.length, skipped: dupeCount };
   }, [submittedLeads]);
 
-  // ─── Asana check — prefers backend route, falls back to browser-direct ────
+  // ─── Asana check — routes through backend (secrets stay server-side) ────
   const runAsanaCheck = useCallback(async (settings, addLog) => {
     const log = addLog || (() => {});
-    const asanaToken = settings?.asanaToken;
     const backendUrl = settings?.backendEndpoint;
 
-    if (!asanaToken && !process.env?.ASANA_ACCESS_TOKEN) {
-      log('Asana check: No access token configured. Configure in Settings → Asana Integration.');
-      return { matched: 0, error: 'No Asana token configured', mode: 'unavailable' };
+    if (!backendUrl) {
+      log('Asana check: Backend endpoint not configured. Set it in Settings to use Asana features.');
+      return { matched: 0, error: 'Backend endpoint required for Asana checks', mode: 'unavailable' };
     }
 
     log('═══ ASANA CHECK STARTED ═══');
+    log(`Mode: BACKEND — routing through ${backendUrl}/api/scan?action=asana`);
 
-    // ─── Prefer backend route (safer: no token exposure, no CORS risk) ───
-    if (backendUrl) {
-      log(`Mode: BACKEND — routing through ${backendUrl}/api/scan?action=asana`);
-      try {
-        const resp = await fetch(`${backendUrl}/api/scan?action=asana`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ settings, existingLeads: leads }),
-        });
-        if (!resp.ok) throw new Error(`Backend HTTP ${resp.status}`);
-        const data = await resp.json();
-        if (data.logs) data.logs.forEach(l => log(l));
-        if (!data.ok) throw new Error(data.error || 'Backend Asana check failed');
-
-        // Store matches for human review — do NOT auto-move
-        if ((data.matches || []).length > 0) {
-          const pending = [];
-          for (const match of data.matches) {
-            const lead = leads.find(l => l.id === match.leadId);
-            if (lead) {
-              log(`  ? PENDING REVIEW: "${lead.title}" → "${match.taskName}" (${match.matchType}, ${Math.round((match.confidence||0)*100)}%)`);
-              pending.push({
-                leadId: lead.id,
-                leadTitle: lead.title,
-                taskName: match.taskName,
-                taskGid: match.taskGid || null,
-                taskUrl: match.taskUrl || match.url || '',
-                matchType: match.matchType || 'unknown',
-                confidence: match.confidence || 0,
-                asana_created_at: match.asana_created_at || null,
-                asana_completed: !!match.asana_completed,
-                asana_completed_at: match.asana_completed_at || null,
-                asana_assignee: match.asana_assignee || null,
-                asana_section: match.asana_section || null,
-                asana_notes_excerpt: match.asana_notes_excerpt || null,
-              });
-            }
-          }
-          if (pending.length > 0) setPendingAsanaMatches(pending);
-        }
-
-        const result = { matched: data.matches?.length || 0, tasksChecked: data.tasks || 0, mode: 'connected', timestamp: new Date().toISOString() };
-        log(`═══ ASANA CHECK COMPLETE — ${result.matched} match(es) ═══`);
-        saveState('lastAsanaCheck', result);
-        return result;
-      } catch (err) {
-        log(`Backend Asana check failed: ${err.message}`);
-        log('Falling back to browser-direct Asana API call...');
-        // Fall through to browser-direct below
-      }
-    }
-
-    // ─── Browser-direct fallback (may hit CORS on some environments) ───
-    if (!asanaToken) {
-      log('No Asana token for browser-direct check.');
-      return { matched: 0, error: 'No Asana token', mode: 'unavailable' };
-    }
-
-    log('Mode: BROWSER-DIRECT — calling Asana API from browser (token exposed in request)');
-    log('⚠ For production, configure Backend Endpoint to route Asana checks server-side.');
-
-    const ASANA_PROJECT = '1203575716271060';
     try {
-      let tasks = [], offset = null;
-      do {
-        const url = `https://app.asana.com/api/1.0/projects/${ASANA_PROJECT}/tasks?opt_fields=name,permalink_url,created_at,completed,completed_at,assignee.name,notes,memberships.section.name&limit=100${offset ? `&offset=${offset}` : ''}`;
-        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${asanaToken}` } });
-        if (!resp.ok) throw new Error(`Asana API ${resp.status}`);
-        const data = await resp.json();
-        if (data.errors?.length) throw new Error(data.errors[0].message);
-        tasks.push(...(data.data || []));
-        offset = data.next_page?.offset || null;
-      } while (offset);
-      log(`Fetched ${tasks.length} tasks`);
+      const resp = await fetch(`${backendUrl}/api/scan?action=asana`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: {}, existingLeads: leads }),
+      });
+      if (!resp.ok) throw new Error(`Backend HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (data.logs) data.logs.forEach(l => log(l));
+      if (!data.ok) throw new Error(data.error || 'Backend Asana check failed');
 
-      const normalize = (t) => (t||'').toLowerCase().replace(/[^a-z0-9\s]/g,'').replace(/\s+/g,' ').trim();
-      const wordSim = (a, b) => {
-        const wa = new Set(normalize(a).split(' ').filter(w=>w.length>2));
-        const wb = new Set(normalize(b).split(' ').filter(w=>w.length>2));
-        if(!wa.size||!wb.size) return 0;
-        let i=0; for(const w of wa) if(wb.has(w)) i++;
-        return i / new Set([...wa,...wb]).size;
-      };
-
-      const taskSection = (task) => {
-        const mb = (task.memberships || []).find(m => m.section?.name);
-        return mb ? mb.section.name : null;
-      };
-      const matched = [];
-      for (const lead of leads) {
-        let found = null;
-        for (const task of tasks) {
-          const na = normalize(lead.title), nb = normalize(task.name);
-          if (na===nb || nb.includes(na) || na.includes(nb)) { found = { task, confidence:0.95, matchType:'exact' }; break; }
-          const s = wordSim(lead.title, task.name);
-          if (s > 0.5) { found = { task, confidence:s, matchType:'fuzzy' }; break; }
+      // Store matches for human review — do NOT auto-move
+      if ((data.matches || []).length > 0) {
+        const pending = [];
+        for (const match of data.matches) {
+          const lead = leads.find(l => l.id === match.leadId);
+          if (lead) {
+            log(`  ? PENDING REVIEW: "${lead.title}" → "${match.taskName}" (${match.matchType}, ${Math.round((match.confidence||0)*100)}%)`);
+            pending.push({
+              leadId: lead.id,
+              leadTitle: lead.title,
+              taskName: match.taskName,
+              taskGid: match.taskGid || null,
+              taskUrl: match.taskUrl || match.url || '',
+              matchType: match.matchType || 'unknown',
+              confidence: match.confidence || 0,
+              asana_created_at: match.asana_created_at || null,
+              asana_completed: !!match.asana_completed,
+              asana_completed_at: match.asana_completed_at || null,
+              asana_assignee: match.asana_assignee || null,
+              asana_section: match.asana_section || null,
+              asana_notes_excerpt: match.asana_notes_excerpt || null,
+            });
+          }
         }
-        if (found) {
-          matched.push({
-            leadId: lead.id,
-            leadTitle: lead.title,
-            taskName: found.task.name,
-            taskGid: found.task.gid || null,
-            taskUrl: found.task.permalink_url || '',
-            matchType: found.matchType,
-            confidence: found.confidence,
-            asana_created_at: found.task.created_at || null,
-            asana_completed: !!found.task.completed,
-            asana_completed_at: found.task.completed_at || null,
-            asana_assignee: found.task.assignee?.name || null,
-            asana_section: taskSection(found.task),
-            asana_notes_excerpt: found.task.notes ? found.task.notes.slice(0, 300) : null,
-          });
-          log(`  ? PENDING REVIEW: "${lead.title}" → "${found.task.name}" (${found.matchType})`);
-        }
+        if (pending.length > 0) setPendingAsanaMatches(pending);
       }
-      if (matched.length > 0) setPendingAsanaMatches(matched);
 
-      const result = { matched: matched.length, tasksChecked: tasks.length, mode: 'browser-direct', timestamp: new Date().toISOString() };
-      log(`═══ ASANA CHECK COMPLETE — ${matched.length} match(es) ═══`);
+      const result = { matched: data.matches?.length || 0, tasksChecked: data.tasks || 0, mode: 'connected', timestamp: new Date().toISOString() };
+      log(`═══ ASANA CHECK COMPLETE — ${result.matched} match(es) ═══`);
       saveState('lastAsanaCheck', result);
       return result;
     } catch (err) {

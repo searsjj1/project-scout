@@ -185,11 +185,11 @@ export default async function handler(req, res) {
 
     // ── ASANA IMPORT — fetch all tasks for import panel ─────
     if (action === 'asana-import') {
-      const token = body.settings?.asanaToken || process.env.ASANA_ACCESS_TOKEN;
+      const token = process.env.ASANA_ACCESS_TOKEN || body.settings?.asanaToken;
       if (!token) {
         return res.status(200).json({ ok: false, error: 'No Asana access token configured.', logs, ts: new Date().toISOString() });
       }
-      const proj = body.settings?.asanaProjectId || process.env.ASANA_PROJECT_ID || '1203575716271060';
+      const proj = process.env.ASANA_PROJECT_ID || body.settings?.asanaProjectId || '1203575716271060';
       log(`Asana import: fetching all tasks from project ${proj}...`);
       let tasks = [], offset = null;
       do {
@@ -222,12 +222,12 @@ export default async function handler(req, res) {
 
     // ── ASANA CHECK ─────────────────────────────────────────
     if (action === 'asana') {
-      const token = body.settings?.asanaToken || process.env.ASANA_ACCESS_TOKEN;
+      const token = process.env.ASANA_ACCESS_TOKEN || body.settings?.asanaToken;
       if (!token) {
-        log('Asana: no token configured');
-        return res.status(200).json({ ok: false, error: 'No Asana access token. Set in Settings or ASANA_ACCESS_TOKEN env var.', mode: 'unavailable', logs, ts: new Date().toISOString() });
+        log('Asana: no token configured — set ASANA_ACCESS_TOKEN environment variable');
+        return res.status(200).json({ ok: false, error: 'No Asana access token. Set ASANA_ACCESS_TOKEN in backend environment variables.', mode: 'unavailable', logs, ts: new Date().toISOString() });
       }
-      const proj = body.settings?.asanaProjectId || process.env.ASANA_PROJECT_ID || '1203575716271060';
+      const proj = process.env.ASANA_PROJECT_ID || body.settings?.asanaProjectId || '1203575716271060';
       log(`Asana: fetching project ${proj}...`);
       let tasks = [], offset = null;
       do {
