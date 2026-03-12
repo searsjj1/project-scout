@@ -530,16 +530,84 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {isSubmitted ? (
               <>
-                <div style={{ padding: '16px', background: '#f0fdf4', borderRadius: 10, border: '1px solid #bbf7d0' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700, color: '#166534', marginBottom: 6 }}>
-                    <CheckCircle2 size={16} /> Submitted to Asana
+                {/* ── Tracking origin banner ── */}
+                {lead.tracking_origin === 'matched_existing' ? (
+                  <div style={{ padding:'16px', background:'#f5f3ff', borderRadius:10, border:'1px solid #ddd6fe' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, fontWeight:700, color:'#5b21b6', marginBottom:6 }}>
+                      <Bookmark size={16} /> Confirmed Asana Match
+                    </div>
+                    <p style={{ fontSize:12, color:'#64748b', margin:'0 0 4px', lineHeight:1.5 }}>
+                      This lead was discovered by Scout and matched to an existing task on the Asana Project Requests board. A human confirmed the match.
+                    </p>
                   </div>
-                  <div style={{ fontSize: 12.5, color: '#475569', lineHeight: 1.6 }}>
-                    {lead.dateSubmittedToAsana && <div>Submitted: {formatDate(lead.dateSubmittedToAsana)}</div>}
-                    {lead.asanaUrl && <div>Asana: <a href={lead.asanaUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>{lead.asanaUrl}</a></div>}
-                    {lead.submissionNotes && <div style={{ marginTop: 4 }}>{lead.submissionNotes}</div>}
+                ) : (
+                  <div style={{ padding:'16px', background:'#eff6ff', borderRadius:10, border:'1px solid #bfdbfe' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:13, fontWeight:700, color:'#1e40af', marginBottom:6 }}>
+                      <Send size={16} /> Submitted from Scout
+                    </div>
+                    <p style={{ fontSize:12, color:'#64748b', margin:'0 0 4px', lineHeight:1.5 }}>
+                      This lead was submitted to the Asana Project Requests board via the Project Initiation Form workflow in Scout.
+                    </p>
                   </div>
-                </div>
+                )}
+
+                {/* ── Asana task details ── */}
+                <DetailSection title="Asana Task Details">
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, fontSize:12.5, color:'#475569', lineHeight:1.7 }}>
+                    {lead.asana_task_name && (
+                      <div style={{ gridColumn:'1 / -1' }}>
+                        <span style={{ fontWeight:600, color:'#64748b' }}>Task: </span>{lead.asana_task_name}
+                      </div>
+                    )}
+                    {lead.dateSubmittedToAsana && (
+                      <div><span style={{ fontWeight:600, color:'#64748b' }}>Tracked since: </span>{formatDate(lead.dateSubmittedToAsana)}</div>
+                    )}
+                    {lead.asana_created_at && (
+                      <div><span style={{ fontWeight:600, color:'#64748b' }}>Created in Asana: </span>{formatDate(lead.asana_created_at)}</div>
+                    )}
+                    {lead.asana_section && (
+                      <div><span style={{ fontWeight:600, color:'#64748b' }}>Board section: </span>{lead.asana_section}</div>
+                    )}
+                    {lead.asana_assignee && (
+                      <div><span style={{ fontWeight:600, color:'#64748b' }}>Assignee: </span>{lead.asana_assignee}</div>
+                    )}
+                    {lead.asana_completed && (
+                      <div>
+                        <span style={{ fontWeight:600, color:'#166534' }}>Completed in Asana </span>
+                        {lead.asana_completed_at ? formatDate(lead.asana_completed_at) : ''}
+                      </div>
+                    )}
+                    {lead.asana_match_type && (
+                      <div>
+                        <span style={{ fontWeight:600, color:'#64748b' }}>Match: </span>
+                        {lead.asana_match_type} ({Math.round((lead.asana_match_confidence || 0) * 100)}%)
+                      </div>
+                    )}
+                    {lead.asanaUrl && (
+                      <div style={{ gridColumn:'1 / -1' }}>
+                        <span style={{ fontWeight:600, color:'#64748b' }}>Asana link: </span>
+                        <a href={lead.asanaUrl} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6', wordBreak:'break-all' }}>{lead.asanaUrl}</a>
+                      </div>
+                    )}
+                  </div>
+                </DetailSection>
+
+                {/* ── Asana notes excerpt ── */}
+                {lead.asana_notes_excerpt && (
+                  <DetailSection title="Asana Task Notes (excerpt)">
+                    <div style={{ fontSize:12, color:'#64748b', lineHeight:1.6, whiteSpace:'pre-wrap', background:'#fafbfc', padding:12, borderRadius:8, border:'1px solid #f1f5f9' }}>
+                      {lead.asana_notes_excerpt}
+                      {lead.asana_notes_excerpt.length >= 300 && <span style={{ color:'#94a3b8' }}> ...</span>}
+                    </div>
+                  </DetailSection>
+                )}
+
+                {/* ── Submission notes ── */}
+                {lead.submissionNotes && (
+                  <DetailSection title="Tracking Notes">
+                    <div style={{ fontSize:12.5, color:'#475569', lineHeight:1.6 }}>{lead.submissionNotes}</div>
+                  </DetailSection>
+                )}
               </>
             ) : (
               <>
@@ -554,7 +622,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                 </DetailSection>
                 <DetailSection title="Daily Asana Check">
                   <p style={{ fontSize: 12.5, color: '#94a3b8', lineHeight: 1.6, margin: 0 }}>
-                    Project Scout checks the Asana Project Requests board daily. If this lead is found there, it will automatically move to "Submitted to Asana" with the match recorded.
+                    Project Scout checks the Asana Project Requests board daily. If this lead matches an existing Asana task, it will appear for your review. Only confirmed matches are moved to tracking.
                   </p>
                 </DetailSection>
               </>
@@ -792,11 +860,62 @@ const selectStyle = { padding: '9px 12px', borderRadius: 8, border: '1px solid #
    ═══════════════════════════════════════════════════════════════ */
 
 function SubmittedTab({ leads, onSelectLead }) {
-  if (leads.length === 0) return <EmptyState icon={<Send size={36} />} title="No Leads in Asana Tracking" message="Submit leads from the Active / Watch tab to track them through the Go/No-Go review process." />;
+  if (leads.length === 0) return <EmptyState icon={<Send size={36} />} title="No Leads in Asana Tracking" message="Submit leads from the Active / Watch tab or confirm Asana matches to track projects through the Go/No-Go review process." />;
+
+  const originBadge = (lead) => {
+    if (lead.tracking_origin === 'matched_existing') return { label:'Confirmed Asana Match', bg:'#ede9fe', fg:'#5b21b6' };
+    if (lead.tracking_origin === 'submitted_from_scout') return { label:'Submitted from Scout', bg:'#dbeafe', fg:'#1e40af' };
+    // Legacy leads without tracking_origin
+    if (lead.submissionNotes?.includes('Confirmed Asana match')) return { label:'Confirmed Asana Match', bg:'#ede9fe', fg:'#5b21b6' };
+    return { label:'Submitted from Scout', bg:'#dbeafe', fg:'#1e40af' };
+  };
+  const completedBadge = (lead) => {
+    if (lead.asana_completed) return { label:'Completed in Asana', bg:'#dcfce7', fg:'#166534' };
+    return null;
+  };
+
+  const matchCount = leads.filter(l => l.tracking_origin === 'matched_existing' || l.submissionNotes?.includes('Confirmed Asana match')).length;
+  const submitCount = leads.length - matchCount;
+
   return (
     <div>
+      {/* Summary bar */}
+      <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+        <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
+          <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Tracked</div>
+          <div style={{ fontSize:18, fontWeight:800, color:'#3b82f6' }}>{leads.length}</div>
+        </div>
+        {submitCount > 0 && (
+          <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
+            <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Submitted</div>
+            <div style={{ fontSize:18, fontWeight:800, color:'#1e40af' }}>{submitCount}</div>
+          </div>
+        )}
+        {matchCount > 0 && (
+          <div style={{ background:'#fff', borderRadius:9, padding:'8px 14px', border:'1px solid rgba(0,0,0,0.05)', display:'flex', alignItems:'center', gap:8 }}>
+            <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8' }}>Matched</div>
+            <div style={{ fontSize:18, fontWeight:800, color:'#5b21b6' }}>{matchCount}</div>
+          </div>
+        )}
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
-        {leads.map(lead => <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)} />)}
+        {leads.map(lead => {
+          const ob = originBadge(lead);
+          const cb = completedBadge(lead);
+          return (
+            <div key={lead.id} style={{ position:'relative' }}>
+              <LeadCard lead={lead} onClick={() => onSelectLead(lead)} />
+              {/* Asana context footer */}
+              <div style={{ padding:'8px 14px', background:'#fafbfc', borderRadius:'0 0 12px 12px', marginTop:-8, border:'1px solid #e2e8f0', borderTop:'none', display:'flex', flexWrap:'wrap', gap:5, alignItems:'center' }}>
+                <span style={{ fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:4, background:ob.bg, color:ob.fg }}>{ob.label}</span>
+                {cb && <span style={{ fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:4, background:cb.bg, color:cb.fg }}>{cb.label}</span>}
+                {lead.asana_section && <span style={{ fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#f1f5f9', color:'#475569' }}>{lead.asana_section}</span>}
+                {lead.asana_assignee && <span style={{ fontSize:10, color:'#94a3b8' }}>{lead.asana_assignee}</span>}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -2225,6 +2344,8 @@ export default function ProjectScout() {
           dateSubmittedToAsana: new Date().toISOString(),
           asanaUrl: asanaUrl || '',
           submissionNotes: notes || 'Submitted via Project Scout PIF workflow.',
+          tracking_origin: lead.tracking_origin || 'submitted_from_scout',
+          asana_synced_at: new Date().toISOString(),
         }, ...sub]);
       }
       return prev.filter(l => l.id !== leadId);
@@ -2244,6 +2365,19 @@ export default function ProjectScout() {
           dateSubmittedToAsana: new Date().toISOString(),
           asanaUrl: match.taskUrl || '',
           submissionNotes: `Confirmed Asana match (${match.matchType}, ${Math.round((match.confidence||0)*100)}%). Matched task: "${match.taskName}".`,
+          // Richer Asana history context
+          asana_task_id: match.taskGid || null,
+          asana_task_name: match.taskName || '',
+          asana_match_type: match.matchType || 'unknown',
+          asana_match_confidence: match.confidence || 0,
+          asana_synced_at: new Date().toISOString(),
+          tracking_origin: 'matched_existing',
+          asana_created_at: match.asana_created_at || null,
+          asana_completed: !!match.asana_completed,
+          asana_completed_at: match.asana_completed_at || null,
+          asana_assignee: match.asana_assignee || null,
+          asana_section: match.asana_section || null,
+          asana_notes_excerpt: match.asana_notes_excerpt || null,
         }, ...sub]);
       }
       return prev.filter(l => l.id !== match.leadId);
@@ -2293,9 +2427,16 @@ export default function ProjectScout() {
                 leadId: lead.id,
                 leadTitle: lead.title,
                 taskName: match.taskName,
+                taskGid: match.taskGid || null,
                 taskUrl: match.taskUrl || match.url || '',
                 matchType: match.matchType || 'unknown',
                 confidence: match.confidence || 0,
+                asana_created_at: match.asana_created_at || null,
+                asana_completed: !!match.asana_completed,
+                asana_completed_at: match.asana_completed_at || null,
+                asana_assignee: match.asana_assignee || null,
+                asana_section: match.asana_section || null,
+                asana_notes_excerpt: match.asana_notes_excerpt || null,
               });
             }
           }
@@ -2326,7 +2467,7 @@ export default function ProjectScout() {
     try {
       let tasks = [], offset = null;
       do {
-        const url = `https://app.asana.com/api/1.0/projects/${ASANA_PROJECT}/tasks?opt_fields=name,permalink_url&limit=100${offset ? `&offset=${offset}` : ''}`;
+        const url = `https://app.asana.com/api/1.0/projects/${ASANA_PROJECT}/tasks?opt_fields=name,permalink_url,created_at,completed,completed_at,assignee.name,notes,memberships.section.name&limit=100${offset ? `&offset=${offset}` : ''}`;
         const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${asanaToken}` } });
         if (!resp.ok) throw new Error(`Asana API ${resp.status}`);
         const data = await resp.json();
@@ -2345,6 +2486,10 @@ export default function ProjectScout() {
         return i / new Set([...wa,...wb]).size;
       };
 
+      const taskSection = (task) => {
+        const mb = (task.memberships || []).find(m => m.section?.name);
+        return mb ? mb.section.name : null;
+      };
       const matched = [];
       for (const lead of leads) {
         let found = null;
@@ -2359,9 +2504,16 @@ export default function ProjectScout() {
             leadId: lead.id,
             leadTitle: lead.title,
             taskName: found.task.name,
+            taskGid: found.task.gid || null,
             taskUrl: found.task.permalink_url || '',
             matchType: found.matchType,
             confidence: found.confidence,
+            asana_created_at: found.task.created_at || null,
+            asana_completed: !!found.task.completed,
+            asana_completed_at: found.task.completed_at || null,
+            asana_assignee: found.task.assignee?.name || null,
+            asana_section: taskSection(found.task),
+            asana_notes_excerpt: found.task.notes ? found.task.notes.slice(0, 300) : null,
           });
           log(`  ? PENDING REVIEW: "${lead.title}" → "${found.task.name}" (${found.matchType})`);
         }
@@ -2507,7 +2659,7 @@ export default function ProjectScout() {
           </h1>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>
             {activeTab === 'active' && `${leads.length} leads across active geography`}
-            {activeTab === 'asana' && `${submittedLeads.length} leads in Asana tracking`}
+            {activeTab === 'asana' && `${submittedLeads.length} project${submittedLeads.length === 1 ? '' : 's'} tracked in Asana`}
             {activeTab === 'notpursued' && `${notPursuedLeads.length} archived leads reviewed and not pursued`}
             {activeTab === 'registry' && 'Source intelligence — sources, entities, geography, families'}
             {activeTab === 'settings' && 'Intelligence engine, AI provider, scheduling, Asana integration'}
@@ -2584,19 +2736,32 @@ export default function ProjectScout() {
                     <ArrowRight size={11} style={{ color:'#94a3b8', flexShrink:0 }} />
                     <span>Asana task: <strong>{match.taskName}</strong></span>
                   </div>
-                  <div style={{ display:'flex', gap:8, marginTop:6 }}>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:6 }}>
                     <span style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background: match.matchType === 'exact' ? '#d1fae5' : '#fef3c7', color: match.matchType === 'exact' ? '#065f46' : '#92400e' }}>
-                      {match.matchType === 'exact' ? 'Exact match' : 'Fuzzy match'}
+                      {match.matchType === 'exact' ? 'Exact match' : match.matchType === 'fuzzy' ? 'Fuzzy match' : match.matchType}
                     </span>
                     <span style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#f1f5f9', color:'#475569' }}>
                       {Math.round((match.confidence||0)*100)}% confidence
                     </span>
+                    {match.asana_completed && (
+                      <span style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#dcfce7', color:'#166534' }}>Completed</span>
+                    )}
+                    {match.asana_section && (
+                      <span style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#f1f5f9', color:'#64748b' }}>{match.asana_section}</span>
+                    )}
                     {match.taskUrl && (
                       <a href={match.taskUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#ede9fe', color:'#5b21b6', textDecoration:'none', display:'flex', alignItems:'center', gap:3 }}>
                         <ExternalLink size={9}/> View in Asana
                       </a>
                     )}
                   </div>
+                  {/* Asana context details */}
+                  {(match.asana_assignee || match.asana_created_at) && (
+                    <div style={{ display:'flex', gap:12, marginTop:6, fontSize:11, color:'#94a3b8' }}>
+                      {match.asana_assignee && <span>Assignee: {match.asana_assignee}</span>}
+                      {match.asana_created_at && <span>Created: {new Date(match.asana_created_at).toLocaleDateString()}</span>}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
                   <button onClick={() => dismissAsanaMatch(match)} style={{ padding:'7px 14px', borderRadius:6, border:'1px solid #e2e8f0', background:'#fff', cursor:'pointer', fontSize:12, fontWeight:600, color:'#64748b' }}>

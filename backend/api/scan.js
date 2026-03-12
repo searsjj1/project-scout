@@ -194,7 +194,7 @@ export default async function handler(req, res) {
       log(`Asana: fetching project ${proj}...`);
       let tasks = [], offset = null;
       do {
-        const u = `https://app.asana.com/api/1.0/projects/${proj}/tasks?opt_fields=name,permalink_url&limit=100${offset?`&offset=${offset}`:''}`;
+        const u = `https://app.asana.com/api/1.0/projects/${proj}/tasks?opt_fields=name,permalink_url,created_at,completed,completed_at,assignee.name,notes,memberships.section.name&limit=100${offset?`&offset=${offset}`:''}`;
         const r = await fetch(u, { headers: { 'Authorization': `Bearer ${token}` } });
         if (!r.ok) { const t = await r.text(); throw new Error(`Asana HTTP ${r.status}: ${t.slice(0,200)}`); }
         const d = await r.json();
@@ -212,20 +212,43 @@ export default async function handler(req, res) {
         let i=0; for(const w of wa) if(wb.has(w)) i++;
         return i / new Set([...wa,...wb]).size;
       };
+      // Extract section name from memberships array
+      const taskSection = (task) => {
+        const m = (task.memberships || []).find(mb => mb.section?.name);
+        return m ? m.section.name : null;
+      };
 
       const matches = [];
       for (const lead of (body.existingLeads||[])) {
         for (const task of tasks) {
           const na=norm(lead.title), nb=norm(task.name);
+          let hit = null;
           if (na===nb || nb.includes(na) || na.includes(nb)) {
-            matches.push({ leadId:lead.id, taskName:task.name, taskUrl:task.permalink_url||'', confidence:0.95, matchType:'exact' });
+            hit = { confidence:0.95, matchType:'exact' };
             log(`  ✓ EXACT: "${lead.title}" → "${task.name}"`);
-            break;
+          } else {
+            const s = wsim(lead.title, task.name);
+            if (s > 0.5) {
+              hit = { confidence:Math.round(s*100)/100, matchType:'fuzzy' };
+              log(`  ~ FUZZY (${Math.round(s*100)}%): "${lead.title}" → "${task.name}"`);
+            }
           }
-          const s = wsim(lead.title, task.name);
-          if (s > 0.5) {
-            matches.push({ leadId:lead.id, taskName:task.name, taskUrl:task.permalink_url||'', confidence:Math.round(s*100)/100, matchType:'fuzzy' });
-            log(`  ~ FUZZY (${Math.round(s*100)}%): "${lead.title}" → "${task.name}"`);
+          if (hit) {
+            matches.push({
+              leadId: lead.id,
+              taskName: task.name,
+              taskGid: task.gid || null,
+              taskUrl: task.permalink_url || '',
+              confidence: hit.confidence,
+              matchType: hit.matchType,
+              // Richer Asana context for history display
+              asana_created_at: task.created_at || null,
+              asana_completed: !!task.completed,
+              asana_completed_at: task.completed_at || null,
+              asana_assignee: task.assignee?.name || null,
+              asana_section: taskSection(task),
+              asana_notes_excerpt: task.notes ? task.notes.slice(0, 300) : null,
+            });
             break;
           }
         }

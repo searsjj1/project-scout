@@ -30,7 +30,7 @@ export async function fetchAsanaTasks(settings) {
   let offset = null;
 
   do {
-    const url = `${ASANA_API}/projects/${asanaProjectId}/tasks?opt_fields=name,created_at,completed,permalink_url,custom_fields&limit=100${offset ? `&offset=${offset}` : ''}`;
+    const url = `${ASANA_API}/projects/${asanaProjectId}/tasks?opt_fields=name,created_at,completed,completed_at,permalink_url,custom_fields,assignee.name,notes,memberships.section.name&limit=100${offset ? `&offset=${offset}` : ''}`;
     const resp = await fetch(url, {
       headers: { 'Authorization': `Bearer ${asanaToken}` },
     });
@@ -119,13 +119,24 @@ export async function runDailyAsanaCheck(activeLeads, settings, onLog = console.
     }
 
     onLog('═══ ASANA CHECK COMPLETE ═══');
+    const taskSection = (task) => {
+      const mb = (task.memberships || []).find(m => m.section?.name);
+      return mb ? mb.section.name : null;
+    };
     return matches.map(m => ({
       leadId: m.lead.id,
-      asanaUrl: m.asanaTask.permalink_url || `https://app.asana.com/0/1203575716271060/${m.asanaTask.gid}`,
+      taskName: m.asanaTask.name,
+      taskGid: m.asanaTask.gid || null,
+      taskUrl: m.asanaTask.permalink_url || `https://app.asana.com/0/1203575716271060/${m.asanaTask.gid}`,
       confidence: m.confidence,
       matchType: m.matchType,
-      asanaTaskName: m.asanaTask.name,
       dateFoundInAsana: new Date().toISOString(),
+      asana_created_at: m.asanaTask.created_at || null,
+      asana_completed: !!m.asanaTask.completed,
+      asana_completed_at: m.asanaTask.completed_at || null,
+      asana_assignee: m.asanaTask.assignee?.name || null,
+      asana_section: taskSection(m.asanaTask),
+      asana_notes_excerpt: m.asanaTask.notes ? m.asanaTask.notes.slice(0, 300) : null,
     }));
   } catch (err) {
     onLog(`ERROR: ${err.message}`);
