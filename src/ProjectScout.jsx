@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Search, ChevronRight, ChevronDown, ExternalLink, MapPin, Building2, Calendar, DollarSign, TrendingUp, Activity, Clock, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Radio, Settings as SettingsIcon, Layers, Send, Archive, Filter, ArrowUpRight, X, BarChart3, Globe, Bookmark, Zap, RefreshCw, Plus, Minus, ChevronLeft, Database, Target, BookOpen, Wifi, WifiOff, Star, Pause, Play, Trash2, Edit3, TestTube, Copy, Save, RotateCcw, Power, Link2, Hash, FileText, Users, Crosshair, UserPlus, ClipboardCheck, MessageSquare, ArrowRight, Shield, Flag, Download } from "lucide-react";
+import { Search, ChevronRight, ChevronDown, ExternalLink, MapPin, Building2, Calendar, DollarSign, TrendingUp, Activity, Clock, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Radio, Settings as SettingsIcon, Layers, Send, Archive, Filter, ArrowUpRight, X, BarChart3, Globe, Bookmark, Zap, RefreshCw, Plus, Minus, ChevronLeft, Database, Target, BookOpen, Wifi, WifiOff, Star, Pause, Play, Trash2, Edit3, TestTube, Copy, Save, RotateCcw, Power, Link2, Hash, FileText, Users, Crosshair, UserPlus, ClipboardCheck, MessageSquare, ArrowRight, Shield, Flag, Download, Upload, HardDrive } from "lucide-react";
 
 // Phase 2 data foundation
 import { runMigration } from './data/migration.js';
@@ -1901,7 +1901,10 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
   const [engineResults, setEngineResults] = useState(null);
   const [runHistory, setRunHistory] = useState(() => loadS('runHistory', []));
   const [lastAsanaCheck, setLastAsanaCheck] = useState(() => loadS('lastAsanaCheck', null));
+  const [backupStatus, setBackupStatus] = useState(null);
+  const [pendingImport, setPendingImport] = useState(null);
   const logRef = useRef(null);
+  const importFileRef = useRef(null);
 
   const addLog = useCallback((msg) => {
     setEngineLog(prev => [...prev, { ts: new Date().toISOString(), msg }]);
@@ -2237,6 +2240,151 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, allLeads, notPursuedLead
           </div>
         </div>
       ))}
+      {/* ─── Data Backup & Restore ─────────────────────────────── */}
+      <div style={{ marginBottom: 28 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 14px', letterSpacing: '-0.01em' }}>
+          <HardDrive size={14} style={{ marginRight: 6, verticalAlign: '-2px' }} />Data Backup &amp; Restore
+        </h3>
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid rgba(0,0,0,0.06)', padding: 20 }}>
+          <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 16px', lineHeight: 1.6 }}>
+            Export all Project Scout data as a JSON file, or import a previously exported backup to restore your data.
+            Importing will <strong>replace all current data</strong> — export first if you want to keep what you have.
+          </p>
+
+          {/* Export */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+            <button onClick={() => {
+              try {
+                const allKeys = [
+                  'ps_source_families', 'ps_coverage_regions', 'ps_county_mapping',
+                  'ps_entities', 'ps_sources', 'ps_proposed_sources', 'ps_proposed_entities',
+                  'ps_leads', 'ps_owner_projects', 'ps_intake', 'ps_settings', 'ps_migration',
+                  'ps_submitted', 'ps_notpursued', 'ps_runHistory', 'ps_lastAsanaCheck',
+                  'ps_focuspoints', 'ps_targetorgs',
+                ];
+                const payload = { _meta: { version: 2, exportedAt: new Date().toISOString(), appName: 'ProjectScout' } };
+                let totalRecords = 0;
+                for (const k of allKeys) {
+                  const raw = localStorage.getItem(k);
+                  if (raw !== null) {
+                    try { payload[k] = JSON.parse(raw); } catch { payload[k] = raw; }
+                    if (Array.isArray(payload[k])) totalRecords += payload[k].length;
+                  }
+                }
+                payload._meta.keysExported = Object.keys(payload).filter(k => k !== '_meta').length;
+                payload._meta.totalRecords = totalRecords;
+                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `project-scout-backup-${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setBackupStatus({ type: 'success', msg: `Exported ${payload._meta.keysExported} data keys (${totalRecords} records) at ${new Date().toLocaleTimeString()}.` });
+              } catch (err) {
+                setBackupStatus({ type: 'error', msg: `Export failed: ${err.message}` });
+              }
+            }} style={{
+              padding: '8px 16px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 7,
+              fontSize: 11.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <Download size={13} /> Export All Data
+            </button>
+
+            {/* Import */}
+            <button onClick={() => importFileRef.current?.click()} style={{
+              padding: '8px 16px', background: '#fff', color: '#0f172a', border: '1px solid #e2e8f0', borderRadius: 7,
+              fontSize: 11.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <Upload size={13} /> Import Backup
+            </button>
+            <input ref={importFileRef} type="file" accept=".json" style={{ display: 'none' }} onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                try {
+                  const data = JSON.parse(ev.target.result);
+                  if (!data._meta || data._meta.appName !== 'ProjectScout') {
+                    setBackupStatus({ type: 'error', msg: 'Invalid backup file — missing Project Scout metadata. Please select a valid export file.' });
+                    return;
+                  }
+                  const dataKeys = Object.keys(data).filter(k => k !== '_meta');
+                  const recordCount = dataKeys.reduce((n, k) => n + (Array.isArray(data[k]) ? data[k].length : 0), 0);
+                  setPendingImport({ data, dataKeys, recordCount, exportedAt: data._meta.exportedAt });
+                } catch (err) {
+                  setBackupStatus({ type: 'error', msg: `Could not read file: ${err.message}` });
+                }
+              };
+              reader.readAsText(file);
+              e.target.value = '';
+            }} />
+          </div>
+
+          {/* Status message */}
+          {backupStatus && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, fontSize: 12, lineHeight: 1.5, marginBottom: 12,
+              background: backupStatus.type === 'success' ? '#f0fdf4' : '#fef2f2',
+              color: backupStatus.type === 'success' ? '#166534' : '#991b1b',
+              border: `1px solid ${backupStatus.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              {backupStatus.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+              {backupStatus.msg}
+            </div>
+          )}
+
+          {/* Import confirmation modal (inline) */}
+          {pendingImport && (
+            <div style={{
+              padding: 16, borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a',
+            }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertCircle size={15} /> Confirm Data Import
+              </div>
+              <p style={{ fontSize: 12, color: '#78350f', margin: '0 0 8px', lineHeight: 1.6 }}>
+                This will <strong>replace ALL current Project Scout data</strong> with the backup file contents.
+                Any data not in the backup will be lost.
+              </p>
+              <ul style={{ fontSize: 11.5, color: '#78350f', margin: '0 0 12px', paddingLeft: 20, lineHeight: 1.8 }}>
+                <li><strong>{pendingImport.dataKeys.length}</strong> data keys will be written</li>
+                <li><strong>{pendingImport.recordCount}</strong> total records</li>
+                {pendingImport.exportedAt && <li>Backup created: <strong>{new Date(pendingImport.exportedAt).toLocaleString()}</strong></li>}
+              </ul>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => {
+                  try {
+                    const { data, dataKeys } = pendingImport;
+                    for (const k of dataKeys) {
+                      localStorage.setItem(k, JSON.stringify(data[k]));
+                    }
+                    setPendingImport(null);
+                    setBackupStatus({ type: 'success', msg: `Imported ${dataKeys.length} data keys (${pendingImport.recordCount} records). Reload the page to see updated data.` });
+                  } catch (err) {
+                    setBackupStatus({ type: 'error', msg: `Import failed: ${err.message}` });
+                    setPendingImport(null);
+                  }
+                }} style={{
+                  padding: '7px 16px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6,
+                  fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+                }}>
+                  Yes, Replace All Data
+                </button>
+                <button onClick={() => { setPendingImport(null); setBackupStatus(null); }} style={{
+                  padding: '7px 16px', background: '#fff', color: '#475569', border: '1px solid #e2e8f0', borderRadius: 6,
+                  fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+                }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* About */}
       <div style={{ marginTop: 40, padding: '20px 24px', background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0' }}>
         <h3 style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 10px', letterSpacing: '-0.01em' }}>About Project Scout</h3>
