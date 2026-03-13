@@ -366,7 +366,14 @@ function LeadCard({ lead, onClick, style: animStyle }) {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: 14 }}>
           <ScoreRing score={lead.relevanceScore || 0} label="Relevance" />
-          <UrgencyRing dueDate={lead.action_due_date} />
+          {lead.action_due_date ? (
+            <UrgencyRing dueDate={lead.action_due_date} />
+          ) : lead.potentialTimeline ? (
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
+              <span style={{ fontSize:11, fontWeight:600, color:'#64748b' }}>{lead.potentialTimeline}</span>
+              <span style={{ fontSize:9, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em' }}>Timeline</span>
+            </div>
+          ) : null}
         </div>
         <div style={{ textAlign: 'right', fontSize: 11, color: '#94a3b8' }}>
           {lead.potentialBudget && <div style={{ fontWeight: 600, color: '#475569', fontSize: 12 }}>{lead.potentialBudget}</div>}
@@ -479,45 +486,66 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
             {/* Scores */}
             <div style={{ display: 'flex', gap: 20, justifyContent: 'center', padding: '10px 0' }}>
               <ScoreRing score={lead.relevanceScore || 0} size={56} strokeWidth={4} label="Relevance" />
-              <UrgencyRing dueDate={lead.action_due_date} size={56} strokeWidth={4} />
+              {lead.action_due_date ? (
+                <UrgencyRing dueDate={lead.action_due_date} size={56} strokeWidth={4} />
+              ) : lead.potentialTimeline ? (
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4, justifyContent:'center' }}>
+                  <span style={{ fontSize:13, fontWeight:700, color:'#64748b' }}>{lead.potentialTimeline}</span>
+                  <span style={{ fontSize:9, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em' }}>Expected Timeline</span>
+                </div>
+              ) : null}
             </div>
-            <DetailSection title="Description"><p style={detailText}>{editing ? <textarea style={fieldTextarea} value={form.description} onChange={e => set('description', e.target.value)} /> : (lead.description || '—')}</p></DetailSection>
+            <DetailSection title="Project Description"><p style={detailText}>{editing ? <textarea style={fieldTextarea} value={form.description} onChange={e => set('description', e.target.value)} /> : (lead.description || '—')}</p></DetailSection>
             <DetailSection title="Why It Matters"><p style={detailText}>{editing ? <textarea style={{ ...fieldTextarea, minHeight: 48 }} value={form.whyItMatters} onChange={e => set('whyItMatters', e.target.value)} /> : (lead.whyItMatters || '—')}</p></DetailSection>
-            {lead.aiReasonForAddition && <DetailSection title="AI Assessment"><p style={{ ...detailText, fontStyle: 'italic', color: '#6366f1' }}>{lead.aiReasonForAddition}</p></DetailSection>}
+            {lead.aiReasonForAddition && <DetailSection title="AI Assessment"><p style={{ ...detailText, color: '#475569', background:'#f8fafc', padding:'10px 14px', borderRadius:8, borderLeft:'3px solid #6366f1' }}>{lead.aiReasonForAddition}</p></DetailSection>}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <DetailField icon={<MapPin size={13} />} label="Location" value={editing ? <input style={fieldInput} value={form.location} onChange={e => set('location', e.target.value)} /> : lead.location} />
               <DetailField icon={<Building2 size={13} />} label="Market" value={lead.marketSector} />
               <DetailField icon={<DollarSign size={13} />} label="Budget" value={editing ? <input style={fieldInput} value={form.potentialBudget} onChange={e => set('potentialBudget', e.target.value)} /> : lead.potentialBudget} />
               <DetailField icon={<Calendar size={13} />} label="Timeline" value={editing ? <input style={fieldInput} value={form.potentialTimeline} onChange={e => set('potentialTimeline', e.target.value)} /> : lead.potentialTimeline} />
-              <DetailField icon={<Clock size={13} />} label="Action Due" value={editing ? <input type="date" style={fieldInput} value={form.action_due_date || ''} onChange={e => set('action_due_date', e.target.value)} /> : (lead.action_due_date ? new Date(lead.action_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')} />
+              {/* Action Due: show only for Active leads with a real solicitation deadline */}
+              <DetailField icon={<Clock size={13} />} label={lead.status === 'active' || lead.leadClass === 'active_solicitation' ? 'Solicitation Due' : 'Action Due'} value={editing ? <input type="date" style={fieldInput} value={form.action_due_date || ''} onChange={e => set('action_due_date', e.target.value)} /> : (lead.action_due_date ? new Date(lead.action_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')} />
               <DetailField icon={<Clock size={13} />} label="Discovered" value={formatDate(lead.dateDiscovered)} />
               <DetailField icon={<RefreshCw size={13} />} label="Last Checked" value={formatDate(lead.lastCheckedDate)} />
             </div>
-            {lead.matchedKeywords?.length > 0 && (
-              <DetailSection title="Matched Keywords">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                  {lead.matchedKeywords.map(k => <span key={k} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: '#f1f5f9', color: '#475569', fontWeight: 500 }}>{k}</span>)}
-                </div>
-              </DetailSection>
-            )}
             {lead.matchedTargetOrgs?.length > 0 && (
-              <DetailSection title="Matched Target Organizations">
+              <DetailSection title="Target Organizations">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                   {lead.matchedTargetOrgs.map(o => <span key={o} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: '#eff6ff', color: '#3b82f6', fontWeight: 500 }}>{o}</span>)}
                 </div>
               </DetailSection>
             )}
-            {lead.sourceName && (
-              <DetailSection title="Source">
-                <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, color:'#475569' }}>
-                  <Database size={13} /><span style={{ fontWeight:500 }}>{lead.sourceName}</span>
+            {lead.matchedKeywords?.length > 0 && (
+              <DetailSection title="Signal Keywords">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                  {lead.matchedKeywords.map(k => <span key={k} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: '#f1f5f9', color: '#94a3b8', fontWeight: 500 }}>{k}</span>)}
                 </div>
-                {lead.sourceUrl && (
-                  <a href={lead.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ display:'inline-flex', alignItems:'center', gap:5, marginTop:6, padding:'5px 12px', borderRadius:6, background:'#eff6ff', border:'1px solid #bfdbfe', color:'#2563eb', fontSize:11.5, fontWeight:600, textDecoration:'none', transition:'background 0.15s' }}
-                    onMouseEnter={e => e.currentTarget.style.background='#dbeafe'} onMouseLeave={e => e.currentTarget.style.background='#eff6ff'}>
-                    <ExternalLink size={12} /> Open source page
-                  </a>
-                )}
+              </DetailSection>
+            )}
+            {/* Source & Evidence Links */}
+            {(lead.sourceName || lead.evidenceSourceLinks?.length > 0) && (
+              <DetailSection title="Source Documents">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {lead.evidenceSourceLinks?.length > 0 ? (
+                    lead.evidenceSourceLinks.map((sl, idx) => (
+                      <a key={idx} href={sl.url} target="_blank" rel="noopener noreferrer"
+                        style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'5px 10px', borderRadius:6, background: sl.linkType === 'source_page' ? '#f8fafc' : '#eff6ff', border: sl.linkType === 'source_page' ? '1px solid #e2e8f0' : '1px solid #bfdbfe', color: sl.linkType === 'source_page' ? '#475569' : '#2563eb', fontSize:11.5, fontWeight:600, textDecoration:'none', transition:'background 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = sl.linkType === 'source_page' ? '#f1f5f9' : '#dbeafe'}
+                        onMouseLeave={e => e.currentTarget.style.background = sl.linkType === 'source_page' ? '#f8fafc' : '#eff6ff'}>
+                        {sl.linkType === 'source_page' ? <Globe size={11} /> : <FileText size={11} />}
+                        {sl.label || sl.url}
+                        <ExternalLink size={10} style={{ opacity:0.5 }} />
+                      </a>
+                    ))
+                  ) : lead.sourceUrl ? (
+                    <a href={lead.sourceUrl} target="_blank" rel="noopener noreferrer"
+                      style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'5px 10px', borderRadius:6, background:'#f8fafc', border:'1px solid #e2e8f0', color:'#475569', fontSize:11.5, fontWeight:600, textDecoration:'none' }}>
+                      <Globe size={11} /> {lead.sourceName || 'Source page'} <ExternalLink size={10} style={{ opacity:0.5 }} />
+                    </a>
+                  ) : (
+                    <span style={{ fontSize: 12, color: '#94a3b8' }}>{lead.sourceName || 'Unknown source'}</span>
+                  )}
+                </div>
               </DetailSection>
             )}
             {editing && (
@@ -532,6 +560,24 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
         {activeTab === 'evidence' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <DetailSection title="Evidence Summary"><p style={detailText}>{lead.evidenceSummary || 'No evidence summary available yet.'}</p></DetailSection>
+            {/* Evidence Source Links — direct document links from scan */}
+            {lead.evidenceSourceLinks?.length > 0 && (
+              <DetailSection title="Evidence Sources">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {lead.evidenceSourceLinks.map((sl, idx) => (
+                    <a key={idx} href={sl.url} target="_blank" rel="noopener noreferrer"
+                      style={{ display:'flex', alignItems:'center', gap:7, padding:'6px 11px', borderRadius:6, background: sl.linkType === 'source_page' ? '#f8fafc' : '#eff6ff', border: sl.linkType === 'source_page' ? '1px solid #e2e8f0' : '1px solid #bfdbfe', color: sl.linkType === 'source_page' ? '#475569' : '#2563eb', fontSize:11.5, fontWeight:600, textDecoration:'none', transition:'background 0.15s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = sl.linkType === 'source_page' ? '#f1f5f9' : '#dbeafe'}
+                      onMouseLeave={e => e.currentTarget.style.background = sl.linkType === 'source_page' ? '#f8fafc' : '#eff6ff'}>
+                      {sl.linkType === 'source_page' ? <Globe size={12} /> : sl.linkType === 'document_pdf' ? <FileText size={12} /> : <Link2 size={12} />}
+                      <span style={{ flex:1 }}>{sl.label || sl.url}</span>
+                      <span style={{ fontSize:9, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.03em', fontWeight:500, whiteSpace:'nowrap' }}>{(sl.linkType || '').replace(/_/g, ' ')}</span>
+                      <ExternalLink size={10} style={{ opacity:0.4, flexShrink:0 }} />
+                    </a>
+                  ))}
+                </div>
+              </DetailSection>
+            )}
             <DetailSection title="Evidence Timeline">
               {(lead.evidence && lead.evidence.length > 0) ? (
                 <div style={{ position: 'relative', paddingLeft: 20 }}>
@@ -550,6 +596,17 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                           onMouseEnter={e => e.currentTarget.style.background='#dbeafe'} onMouseLeave={e => e.currentTarget.style.background='#eff6ff'}>
                           <ExternalLink size={11} /> Open source document
                         </a>
+                      )}
+                      {/* Child document links within this evidence entry */}
+                      {ev.childLinks?.length > 0 && (
+                        <div style={{ display:'flex', flexDirection:'column', gap:3, marginTop:6 }}>
+                          {ev.childLinks.map((cl, ci) => (
+                            <a key={ci} href={cl.url} target="_blank" rel="noopener noreferrer"
+                              style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'3px 9px', borderRadius:5, background:'#f0fdf4', border:'1px solid #bbf7d0', color:'#15803d', fontSize:10.5, fontWeight:600, textDecoration:'none' }}>
+                              <FileText size={10} /> {cl.anchorText || cl.label || 'Document'} <ExternalLink size={9} style={{ opacity:0.4 }} />
+                            </a>
+                          ))}
+                        </div>
                       )}
                     </div>
                   ))}

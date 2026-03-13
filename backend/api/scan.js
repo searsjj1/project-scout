@@ -60,6 +60,7 @@ async function fetchUrl(url, timeout = 15000) {
       ok: r.status >= 200 && r.status < 400,
       status: r.status,
       content: content.slice(0, 50000),
+      rawHtml: raw.slice(0, 200000), // Preserve raw HTML for link extraction
       title: tm ? tm[1].trim() : null,
       length: content.length,
       lastMod: r.headers.get('last-modified'),
@@ -67,9 +68,155 @@ async function fetchUrl(url, timeout = 15000) {
     };
   } catch (e) {
     clearTimeout(t);
-    return { ok: false, status: null, content: null, title: null, length: 0, lastMod: null,
+    return { ok: false, status: null, content: null, rawHtml: null, title: null, length: 0, lastMod: null,
       err: e.name === 'AbortError' ? `Timeout (${timeout}ms)` : e.message };
   }
+}
+
+// ── Extract child document links from raw HTML ──────────────
+// Finds links to RFQ/RFP detail pages, meeting minutes, CIP documents, bid pages, etc.
+// Returns array of { url, anchorText, linkType, relevanceHint }
+function extractChildLinks(rawHtml, sourceUrl) {
+  if (!rawHtml) return [];
+  const links = [];
+  const seen = new Set();
+  let baseUrl;
+  try { baseUrl = new URL(sourceUrl); } catch { return []; }
+
+  // Match <a href="...">text</a> patterns
+  const linkPat = /<a\s[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (const m of rawHtml.matchAll(linkPat)) {
+    let href = m[1].trim();
+    const anchor = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (!href || href.startsWith('javascript:') || href.startsWith('mailto:')) continue;
+    if (anchor.length < 5 || anchor.length > 200) continue;
+
+    // Resolve relative URLs
+    try {
+      const resolved = new URL(href, sourceUrl);
+      href = resolved.href;
+    } catch { continue; }
+
+    if (seen.has(href)) continue;
+    seen.add(href);
+
+    const lo = anchor.toLowerCase();
+    const hrefLo = href.toLowerCase();
+
+    // Classify link type by anchor text and URL patterns
+    let linkType = null;
+    let relevanceHint = 0;
+
+    // RFQ/RFP/solicitation detail pages
+    if (/\b(rfq|rfp|request for|solicitation|invitation to bid)\b/.test(lo) ||
+        /\b(bid|rfq|rfp|solicitation)\b/.test(hrefLo)) {
+      linkType = 'solicitation_detail';
+      relevanceHint = 10;
+    }
+    // Meeting minutes/agendas with dates
+    else if (/\b(minutes|agenda|meeting)\b/.test(lo) && /\d{1,2}[\/-]\d{1,2}|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d/i.test(lo + ' ' + hrefLo)) {
+      linkType = 'meeting_document';
+      relevanceHint = 7;
+    }
+    // CIP/budget/capital plan documents
+    else if (/\b(capital improvement|cip|budget|capital plan|facilities plan)\b/.test(lo)) {
+      linkType = 'capital_document';
+      relevanceHint = 8;
+    }
+    // Project detail pages
+    else if (/\b(project detail|project page|view project|project info)\b/.test(lo) ||
+             /\b(bid(ID|id|_id|detail)|projectid|project_id)\b/.test(hrefLo)) {
+      linkType = 'project_detail';
+      relevanceHint = 9;
+    }
+    // PDF documents that look like project documents
+    else if (/\.pdf$/i.test(hrefLo) && /\b(rfq|rfp|bid|plan|design|capital|renovation|addition|facility)\b/.test(lo)) {
+      linkType = 'document_pdf';
+      relevanceHint = 8;
+    }
+    // Board/commission packets
+    else if (/\b(packet|attachment|exhibit|appendix)\b/.test(lo) && /\.pdf$/i.test(hrefLo)) {
+      linkType = 'board_packet';
+      relevanceHint = 6;
+    }
+
+    if (linkType) {
+      links.push({ url: href, anchorText: anchor, linkType, relevanceHint });
+    }
+  }
+
+  // Sort by relevance hint (highest first)
+  links.sort((a, b) => b.relevanceHint - a.relevanceHint);
+  return links.slice(0, 20); // Cap at 20 links
+}
+
+// ── Follow the best child link for enrichment ───────────────
+// Fetches the single best child page to extract richer project detail.
+// Returns { enrichedContent, childUrl, childTitle, childLinkType, childAnchorText,
+//           childDates, childBudget, childDescription } or null on failure.
+// Safe: 10s timeout, returns null on any error, never fabricates.
+async function enrichFromChildLink(bestLink) {
+  if (!bestLink) return null;
+
+  try {
+    const f = await fetchUrl(bestLink.url, 10000);
+    if (!f.ok || !f.content || f.content.length < 100) return null;
+    const content = f.content.slice(0, 20000);
+
+    // Extract dates from child content
+    const childDates = extractDates(content);
+
+    // Extract budget from child content
+    const childBudget = extractBudget(content);
+
+    // Extract a description: best sentences mentioning project substance
+    const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.length > 25 && s.length < 300);
+    const projectSentences = sentences.filter(s => {
+      const sl = s.toLowerCase();
+      return /\b(project|design|construction|renovation|scope|services?|building|facility|phase|architect|engineer)\b/.test(sl);
+    });
+    const childDescription = projectSentences.slice(0, 3).join(' ').slice(0, 500).trim() || null;
+
+    return {
+      enrichedContent: content,
+      childUrl: bestLink.url,
+      childTitle: f.title || bestLink.anchorText,
+      childLinkType: bestLink.linkType,
+      childAnchorText: bestLink.anchorText,
+      childDates,
+      childBudget,
+      childDescription,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Select the single best child link for a specific lead candidate.
+ * Prioritizes: solicitation_detail > project_detail > capital_document > document_pdf > meeting_document > board_packet.
+ * Within a type, prefers links whose anchor text overlaps with the matched lead text.
+ * Returns the single best link object, or null.
+ */
+function selectBestChildLink(childLinks, matchText, title) {
+  if (!childLinks || childLinks.length === 0) return null;
+  const textLo = `${matchText || ''} ${title || ''}`.toLowerCase();
+  const textWords = textLo.split(/\s+/).filter(w => w.length > 3);
+
+  // Score each child link: relevanceHint + text overlap bonus
+  let best = null, bestScore = -1;
+  for (const link of childLinks) {
+    let score = link.relevanceHint || 0;
+    const anchorLo = link.anchorText.toLowerCase();
+    // Text overlap bonus: each matching word adds 1 point
+    for (const w of textWords) {
+      if (anchorLo.includes(w)) score += 1;
+    }
+    if (score > bestScore) { bestScore = score; best = link; }
+  }
+
+  // Only return if there's a meaningful match (link type was classified, scored at least 6)
+  return (best && bestScore >= 6) ? best : null;
 }
 
 // ── Keyword pre-filter ──────────────────────────────────────
@@ -421,8 +568,172 @@ function scoreCandidate(ctx, src, kws, fps, orgs) {
   };
 }
 
+// ── A&E + SMA service-fit assessment ────────────────────────
+// Based on publicly listed services: Architecture, Brand Development, Environmental
+// Graphic Design, Historic Preservation, Interior Design, Landscape Architecture
+// Markets: Commercial, Hospitality, K-12, Residential, Healthcare, Higher Education, Military
+const AE_SERVICES = {
+  strong: [
+    /\b(architect\w*|design services?|a\/e services?|interior design|landscape architect\w*|historic preservation|environmental graphic)\b/i,
+    /\b(new (?:construction|building|facility)|renovation|remodel|addition|expansion|modernization)\b/i,
+    /\b(master plan|feasibility study|space (?:plan|needs|study)|programming|schematic design)\b/i,
+  ],
+  moderate: [
+    /\b(tenant improvement|adaptive reuse|wayfinding|signage program|branding)\b/i,
+    /\b(site (?:planning|design)|campus plan|facility assessment)\b/i,
+  ],
+  weak: [
+    /\b(engineering services?|civil engineer|structural engineer|mep)\b/i,
+    /\b(construction management|cm at risk|design.build)\b/i,
+  ],
+};
+const AE_MARKETS = {
+  core: ['K-12','Higher Education','Healthcare','Civic','Hospitality','Commercial','Housing','Recreation'],
+  secondary: ['Public Safety','Airports / Aviation','Tribal','Infrastructure','Research / Lab'],
+  peripheral: ['Industrial','Retail','Developer-Led','Other'],
+};
+
+function assessServiceFit(ctx, market) {
+  const lo = (ctx || '').toLowerCase();
+  let fit = 0;
+  let reasons = [];
+  for (const p of AE_SERVICES.strong) { if (p.test(lo)) { fit += 15; reasons.push('architectural/design services alignment'); break; } }
+  for (const p of AE_SERVICES.moderate) { if (p.test(lo)) { fit += 8; reasons.push('related design discipline'); break; } }
+  for (const p of AE_SERVICES.weak) { if (p.test(lo)) { fit += 3; break; } }
+  if (AE_MARKETS.core.includes(market)) { fit += 12; reasons.push(`${market} is a core A&E + SMA market`); }
+  else if (AE_MARKETS.secondary.includes(market)) { fit += 6; reasons.push(`${market} is a secondary market`); }
+  else { fit += 1; }
+  return { fit: Math.min(30, fit), reasons };
+}
+
+// ── Better location extraction from content ─────────────────
+function extractLocation(ctx, src) {
+  const lo = (ctx || '').toLowerCase();
+  // Try to find a specific city/town mention
+  const mtCities = [
+    'Missoula','Kalispell','Whitefish','Columbia Falls','Hamilton','Polson',
+    'Helena','Great Falls','Billings','Bozeman','Butte','Anaconda',
+    'Libby','Thompson Falls','Superior','Ronan','Pablo','St. Ignatius',
+    'Stevensville','Florence','Lolo','Frenchtown','Seeley Lake','Bigfork',
+    'Lakeside','Somers','Eureka','Troy','Plains','Hot Springs',
+  ];
+  for (const city of mtCities) {
+    if (lo.includes(city.toLowerCase())) {
+      // Try to find the county too
+      const countyPat = new RegExp(city + '[^.]{0,30}(\\w+ county)', 'i');
+      const cm = ctx.match(countyPat);
+      return cm ? `${city}, ${cm[1]}, MT` : `${city}, MT`;
+    }
+  }
+  // Fall back to county if available
+  const countyPat = /\b(\w+(?:\s+\w+)?\s+county)\b/i;
+  const cm = lo.match(countyPat);
+  if (cm) return `${cm[1].replace(/\b\w/g, c => c.toUpperCase())}, MT`;
+  // Fall back to source geography
+  if (src.geography && src.geography !== 'Statewide') return `${src.geography}, MT`;
+  if (src.county) return `${src.county}, MT`;
+  return 'Montana';
+}
+
+// ── Generate a real project description (not just regex match) ──
+function generateDescription(matchText, fullContext, leadClass, market, projectType, budget, timeline, src) {
+  const parts = [];
+
+  // Core: what is the project?
+  const cleanMatch = matchText.replace(/\s+/g, ' ').trim();
+  // Try to extract a meaningful sentence from fullContext
+  const sentences = fullContext.split(/(?<=[.!])\s+/).filter(s => s.length > 20 && s.length < 250);
+  const bestSentence = sentences.find(s => {
+    const sl = s.toLowerCase();
+    return /\b(project|construction|renovation|addition|building|facility|design|plan)\b/.test(sl);
+  }) || sentences[0] || cleanMatch;
+
+  // Don't repeat the title — use the sentence if it adds information
+  if (bestSentence.length > 30) {
+    parts.push(bestSentence.slice(0, 250).trim());
+  } else {
+    parts.push(cleanMatch.slice(0, 250).trim());
+  }
+
+  // Add budget and timeline if available and not already in the sentence
+  const extras = [];
+  if (budget && !parts[0].includes('$')) extras.push(`Estimated budget: ${budget}`);
+  if (timeline && !parts[0].toLowerCase().includes(timeline.toLowerCase())) extras.push(`Timeline: ${timeline}`);
+  if (extras.length > 0) parts.push(extras.join('. '));
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+}
+
+// ── Generate meaningful "Why It Matters" ────────────────────
+function generateWhyItMatters(leadClass, market, location, scores, src, serviceFit) {
+  const parts = [];
+
+  // Service/market fit
+  if (serviceFit.reasons.length > 0) {
+    parts.push(serviceFit.reasons[0].charAt(0).toUpperCase() + serviceFit.reasons[0].slice(1));
+  }
+  if (serviceFit.reasons.length > 1) parts.push(serviceFit.reasons[1]);
+
+  // Geography relevance
+  const coreGeos = ['missoula','kalispell','whitefish','columbia falls','hamilton','polson'];
+  const locLo = (location || '').toLowerCase();
+  if (coreGeos.some(g => locLo.includes(g))) {
+    parts.push('Located in a core A&E + SMA service area');
+  } else if (/\b(flathead|ravalli|lake|missoula)\b/.test(locLo)) {
+    parts.push('Located in Western Montana, within the firm\'s primary region');
+  }
+
+  // Solicitation urgency
+  if (leadClass === 'active_solicitation') {
+    parts.push('Active solicitation — may require near-term response');
+  }
+
+  // Target org
+  if (scores.matchedOrgs.length > 0) {
+    parts.push(`${scores.matchedOrgs.map(o => o.name).join(', ')} is a tracked target organization`);
+  }
+
+  if (parts.length === 0) parts.push('Potential A&E project opportunity identified through source monitoring');
+  return parts.join('. ') + '.';
+}
+
+// ── Generate meaningful AI Assessment ───────────────────────
+function generateAIAssessment(leadClass, market, projectType, scores, serviceFit, location, budget) {
+  const parts = [];
+
+  // Opportunity characterization
+  if (leadClass === 'active_solicitation') {
+    parts.push(`This appears to be an active ${projectType !== 'Other' ? projectType.toLowerCase() + ' ' : ''}solicitation`);
+    if (market !== 'Other') parts.push(`in the ${market} sector`);
+  } else {
+    parts.push(`This is a planning-stage ${projectType !== 'Other' ? projectType.toLowerCase() + ' ' : ''}signal`);
+    if (market !== 'Other') parts.push(`in the ${market} sector`);
+  }
+
+  // Service alignment assessment
+  if (serviceFit.fit >= 20) {
+    parts.push('Strong alignment with A&E + SMA capabilities');
+  } else if (serviceFit.fit >= 10) {
+    parts.push('Moderate alignment with firm capabilities');
+  } else {
+    parts.push('Limited alignment with A&E + SMA core services — review whether pursuit is warranted');
+  }
+
+  // Practical advice
+  if (leadClass === 'active_solicitation' && serviceFit.fit >= 15) {
+    parts.push('Recommend reviewing the solicitation documents and assessing go/no-go');
+  } else if (leadClass === 'watch_signal') {
+    parts.push('Monitor for solicitation release or further development');
+  }
+
+  // Budget context
+  if (budget) parts.push(`Budget information present (${budget}), suggesting a funded project`);
+
+  return parts.join('. ') + '.';
+}
+
 // ── Extract leads from real fetched content ─────────────────
-function extractLeads(content, src, kws, fps, orgs) {
+async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () => {}) {
   if (!content || content.length < 50) return [];
 
   // ── Step 1: Clean content — remove obvious nav/menu/footer text
@@ -486,6 +797,8 @@ function extractLeads(content, src, kws, fps, orgs) {
   // ── Step 3: Build lead records from valid candidates
   const leads = [];
   const now = new Date().toISOString();
+  const MAX_CHILD_FETCHES_PER_SOURCE = 2; // Limit child-page fetches to control latency
+  let childFetchCount = 0;
 
   for (const cand of candidates) {
     if (leads.length >= 5) break; // Cap per source
@@ -513,75 +826,161 @@ function extractLeads(content, src, kws, fps, orgs) {
     // Score
     const scores = scoreCandidate(fullContext, src, kws, fps, orgs);
 
-    // Build description from context (not just raw regex match)
-    const description = fullContext.length > 30 ? fullContext.slice(0, 300) : matchText.slice(0, 300);
+    // Service-fit assessment
+    const serviceFit = assessServiceFit(fullContext, market);
+
+    // Adjust relevance by service fit (replaces pure keyword weighting)
+    const adjustedRelevance = Math.min(100, Math.max(0, Math.round(
+      scores.relevanceScore * 0.7 + serviceFit.fit * 1.0
+    )));
+    const adjustedPursuit = Math.min(100, Math.max(0, Math.round(
+      scores.pursuitScore * 0.8 + (serviceFit.fit >= 15 ? 12 : serviceFit.fit >= 8 ? 5 : 0)
+    )));
+
+    // Better location
+    const location = extractLocation(fullContext, src);
+
+    // Build description from context — prefer meaningful summary over raw match
+    const description = generateDescription(matchText, fullContext, leadClass, market, projectType, budget, dates.potentialTimeline, src);
 
     // Build evidence with useful context
     const sourceDesc = describeSourceType(src);
     const id = `lead-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    // ── Child-document enrichment ────────────────────────────
+    // Find all relevant child links for this lead
+    const relevantChildLinks = (childLinks || []).filter(link => {
+      const al = link.anchorText.toLowerCase();
+      const tl = title.toLowerCase();
+      const words = tl.split(/\s+/).filter(w => w.length > 3);
+      return words.some(w => al.includes(w)) || link.relevanceHint >= 9;
+    });
+
+    // Select the single best child link for enrichment fetch
+    const bestChildLink = selectBestChildLink(relevantChildLinks.length > 0 ? relevantChildLinks : childLinks, matchText, title);
+
+    // Fetch child page content if we have a strong link and haven't blown our per-source budget
+    let childEnrichment = null;
+    if (bestChildLink && childFetchCount < MAX_CHILD_FETCHES_PER_SOURCE) {
+      childFetchCount++;
+      childEnrichment = await enrichFromChildLink(bestChildLink);
+      if (childEnrichment) {
+        log(`    ↳ child enrichment: ${bestChildLink.linkType} "${bestChildLink.anchorText.slice(0, 50)}"`);
+      }
+    }
+
+    // ── Merge child enrichment into lead fields ─────────────
+    // Dates: prefer child dates if they add new information
+    let finalDates = dates;
+    let finalBudget = budget;
+    let finalDescription = description;
+
+    if (childEnrichment) {
+      // Dates: child page may have more specific deadline
+      if (childEnrichment.childDates) {
+        if (!finalDates.action_due_date && childEnrichment.childDates.action_due_date) {
+          finalDates = { ...finalDates, action_due_date: childEnrichment.childDates.action_due_date };
+        }
+        if (!finalDates.potentialTimeline && childEnrichment.childDates.potentialTimeline) {
+          finalDates = { ...finalDates, potentialTimeline: childEnrichment.childDates.potentialTimeline };
+        }
+      }
+      // Budget: prefer child-sourced budget if parent didn't have one
+      if (!finalBudget && childEnrichment.childBudget) {
+        finalBudget = childEnrichment.childBudget;
+      }
+      // Description: prefer child description if it's substantially richer
+      if (childEnrichment.childDescription && childEnrichment.childDescription.length > (finalDescription || '').length * 0.6) {
+        finalDescription = childEnrichment.childDescription;
+      }
+    }
+
+    // Action Due: for Active leads use solicitation due date; for Watch use timeline
+    let actionDue = '';
+    if (status === 'active' && finalDates.action_due_date) {
+      actionDue = finalDates.action_due_date; // Actual solicitation deadline
+    }
+    // For Watch leads, leave action_due_date blank — timeline is shown separately
+
+    // Evidence: use child link if available, else fall back to source page
+    const evidenceUrl = bestChildLink ? bestChildLink.url : src.url;
+    const evidenceLabel = bestChildLink
+      ? `${bestChildLink.linkType === 'solicitation_detail' ? 'Solicitation' : bestChildLink.linkType === 'meeting_document' ? 'Meeting document' : bestChildLink.linkType === 'capital_document' ? 'Capital plan document' : bestChildLink.linkType === 'project_detail' ? 'Project detail' : bestChildLink.linkType === 'document_pdf' ? 'Project document (PDF)' : 'Source document'} found via ${src.name}`
+      : `Signal detected in ${sourceDesc}`;
     const evTitle = leadClass === 'active_solicitation'
-      ? `Active solicitation found in ${sourceDesc}`
-      : `Project signal detected in ${sourceDesc}`;
-    const evSummary = `${evTitle}. ${matchText.slice(0, 200)}${matchText.length > 200 ? '...' : ''}`;
+      ? `Active solicitation: ${evidenceLabel}`
+      : `Project signal: ${evidenceLabel}`;
 
-    // Build why it matters with real context
-    const whyParts = [];
-    if (leadClass === 'active_solicitation') whyParts.push('Active solicitation requiring A/E response');
-    else whyParts.push(`Project signal detected from ${src.category || 'source'}`);
-    if (market !== 'Other') whyParts.push(`${market} sector aligns with firm capabilities`);
-    if (scores.matchedOrgs.length > 0) whyParts.push(`matched target org: ${scores.matchedOrgs.map(o => o.name).join(', ')}`);
-    if (src.geography) whyParts.push(`located in ${src.geography}, a priority geography`);
+    // Build evidence summary with more detail
+    const evDetailParts = [];
+    evDetailParts.push(evTitle);
+    if (bestChildLink) evDetailParts.push(`Direct document: "${bestChildLink.anchorText}"`);
+    if (childEnrichment) evDetailParts.push('Enriched from child document');
+    evDetailParts.push(matchText.slice(0, 180).trim());
+    const evSummary = evDetailParts.join('. ') + (matchText.length > 180 ? '...' : '.');
 
-    // Build AI reason with specifics
-    const aiParts = [];
-    aiParts.push(`Discovered via ${src.name} (${sourceDesc})`);
-    if (kws.length > 0) aiParts.push(`signal keywords: ${kws.slice(0, 5).join(', ')}`);
-    if (scores.matchedFPs.length > 0) aiParts.push(`matches focus areas: ${scores.matchedFPs.map(f => f.title).join(', ')}`);
-    if (scores.matchedOrgs.length > 0) aiParts.push(`target org match: ${scores.matchedOrgs.map(o => o.name).join(', ')}`);
+    // Better why-it-matters
+    const whyItMatters = generateWhyItMatters(leadClass, market, location, scores, src, serviceFit);
+
+    // Better AI assessment
+    const aiReasonForAddition = generateAIAssessment(leadClass, market, projectType, scores, serviceFit, location, finalBudget);
 
     // Build confidence notes
     const confParts = [];
     confParts.push(`Source: ${src.category || 'Unknown'} (${src.priority || 'standard'} priority)`);
-    confParts.push(`${kws.length} signal keyword${kws.length !== 1 ? 's' : ''} matched`);
+    if (serviceFit.fit >= 15) confParts.push('Strong A&E service alignment');
+    else if (serviceFit.fit >= 8) confParts.push('Moderate A&E service alignment');
+    else confParts.push('Limited A&E service alignment');
     if (leadClass === 'active_solicitation') confParts.push('Active solicitation detected');
-    if (dates.action_due_date) confParts.push(`Due date found: ${dates.action_due_date}`);
-    if (budget) confParts.push('Budget information present');
+    if (actionDue) confParts.push(`Solicitation due: ${actionDue}`);
+    if (finalBudget) confParts.push('Budget information present');
+    if (childEnrichment) confParts.push('Enriched from child document');
+    else if (bestChildLink) confParts.push('Direct document link available');
+
+    // Build all evidence source links (source page + child links)
+    const evidenceSourceLinks = [{ url: src.url, label: src.name, linkType: 'source_page' }];
+    for (const cl of relevantChildLinks.slice(0, 5)) {
+      evidenceSourceLinks.push({ url: cl.url, label: cl.anchorText, linkType: cl.linkType });
+    }
 
     leads.push({
       id, title,
       owner: src.organization || '',
       projectName: title !== `${src.organization || src.name} — ${inferType(matchText)}` ? title : '',
-      location: src.geography ? `${src.geography}, MT` : 'Montana',
+      location,
       county: src.county || '', geography: src.geography || '',
       marketSector: market,
       projectType,
-      description,
-      whyItMatters: whyParts.join('. ') + '.',
-      aiReasonForAddition: aiParts[0].charAt(0).toUpperCase() + aiParts.join('; ').slice(1) + '.',
-      potentialTimeline: dates.potentialTimeline,
-      potentialBudget: budget,
-      action_due_date: dates.action_due_date,
-      relevanceScore: scores.relevanceScore,
-      pursuitScore: scores.pursuitScore,
+      description: finalDescription,
+      whyItMatters,
+      aiReasonForAddition,
+      potentialTimeline: finalDates.potentialTimeline,
+      potentialBudget: finalBudget,
+      action_due_date: actionDue,
+      relevanceScore: adjustedRelevance,
+      pursuitScore: adjustedPursuit,
       sourceConfidenceScore: scores.sourceConfidenceScore,
       confidenceNotes: confParts.join('. ') + '.',
       dateDiscovered: now, originalSignalDate: now,
       lastCheckedDate: now,
       status, leadClass, leadOrigin: 'live',
       sourceName: src.name, sourceUrl: src.url, sourceId: src.id,
-      evidenceLinks: [src.url],
+      evidenceLinks: [...new Set([evidenceUrl, src.url])],
+      evidenceSourceLinks,
       evidenceSummary: evSummary,
       matchedFocusPoints: scores.matchedFPs.map(f => f.title),
       matchedKeywords: kws.slice(0, 10),
       matchedTargetOrgs: scores.matchedOrgs.map(o => o.name),
       internalContact: '', notes: '',
       evidence: [{
-        id: `ev-${id}`, leadId: id, sourceId: src.id, sourceName: src.name, url: src.url,
+        id: `ev-${id}`, leadId: id, sourceId: src.id, sourceName: src.name,
+        url: evidenceUrl,
         title: evTitle,
         summary: evSummary,
         signalDate: now, dateFound: now,
-        signalStrength: leadClass === 'active_solicitation' ? 'strong' : (scores.relevanceScore > 60 ? 'medium' : 'weak'),
+        signalStrength: leadClass === 'active_solicitation' ? 'strong' : (adjustedRelevance > 60 ? 'medium' : 'weak'),
         keywords: kws.slice(0, 8),
+        childLinks: relevantChildLinks.slice(0, 3).map(cl => ({ url: cl.url, label: cl.anchorText, type: cl.linkType })),
       }],
     });
   }
@@ -623,7 +1022,9 @@ export default async function handler(req, res) {
         kw = preFilter(f.content, source);
         log(`Keywords: ${kw.n} (${kw.pass?'PASS':'BELOW THRESHOLD'}): ${kw.kw.slice(0,6).join(', ')}`);
         if (kw.pass) {
-          leads = extractLeads(f.content, source, kw.kw, body.focusPoints||[], body.targetOrgs||[]);
+          const childLinks = extractChildLinks(f.rawHtml, source.url);
+          log(`Found ${childLinks.length} child document links`);
+          leads = await extractLeads(f.content, source, kw.kw, body.focusPoints||[], body.targetOrgs||[], childLinks, log);
           log(`Extracted ${leads.length} lead(s)`);
         } else {
           log('No leads — keyword threshold not met');
@@ -804,7 +1205,10 @@ export default async function handler(req, res) {
       parseHits++;
       log(`  → ${n} keywords: ${kw.slice(0,5).join(', ')}`);
 
-      const cands = extractLeads(f.content, src, kw, focusPoints||[], targetOrgs||[]);
+      const childLinks = extractChildLinks(f.rawHtml, src.url);
+      if (childLinks.length > 0) log(`  → ${childLinks.length} child document links found`);
+
+      const cands = await extractLeads(f.content, src, kw, focusPoints||[], targetOrgs||[], childLinks, log);
       log(`  → ${cands.length} candidate(s)`);
 
       for (const c of cands) {
