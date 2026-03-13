@@ -71,28 +71,51 @@ function determineSignalStrength(keywords, source) {
 
 /**
  * Generate a brief evidence summary from content and keywords.
- * This is the rule-based version; AI can enrich later.
+ * Improved: uses top 2 sentences, adds keyword context, avoids nav junk.
  */
 function generateEvidenceSummary(content, keywords) {
   if (!content) return 'Signal detected from source monitoring.';
 
-  // Find sentence(s) containing the highest-value keywords
-  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 20);
+  // Filter out obvious navigation / junk sentences
+  const navPatterns = /expand for details|collapse|skip to|toggle navigation|copyright|privacy policy|terms of use|all rights reserved|powered by|sign in|log in/i;
+
+  const sentences = content.split(/[.!?]+/).filter(s => {
+    const t = s.trim();
+    return t.length > 25 && t.length < 400 && !navPatterns.test(t);
+  });
+
   const scored = sentences.map(s => {
     const lower = s.toLowerCase();
     let score = 0;
+    const criticalTerms = ['rfq', 'rfp', 'invitation to bid', 'design services', 'architect', 'a/e'];
+    const highTerms = ['capital improvement', 'bond', 'levy', 'master plan', 'facilities plan'];
     for (const kw of keywords) {
-      if (lower.includes(kw.toLowerCase())) score++;
+      const kl = kw.toLowerCase();
+      if (criticalTerms.includes(kl)) score += 3;
+      else if (highTerms.includes(kl)) score += 2;
+      else if (lower.includes(kl)) score += 1;
     }
     return { sentence: s.trim(), score };
   }).filter(s => s.score > 0).sort((a, b) => b.score - a.score);
 
-  if (scored.length > 0) {
-    const top = scored[0].sentence;
-    return top.length > 200 ? top.slice(0, 197) + '...' : top + '.';
+  if (scored.length >= 2) {
+    const s1 = scored[0].sentence;
+    const s2 = scored[1].sentence;
+    const combined = `${s1}. ${s2}`;
+    return combined.length > 350 ? `${s1.slice(0, 250)}...` : combined + '.';
   }
 
-  return `Source content contains ${keywords.length} matching signal${keywords.length !== 1 ? 's' : ''}.`;
+  if (scored.length === 1) {
+    const top = scored[0].sentence;
+    return top.length > 250 ? top.slice(0, 247) + '...' : top + '.';
+  }
+
+  // Fallback: mention which keywords were found
+  if (keywords.length > 0) {
+    return `Source content contains signal keywords: ${keywords.slice(0, 5).join(', ')}. Review source page for project details.`;
+  }
+
+  return 'Signal detected from source monitoring. Review source page for details.';
 }
 
 /**

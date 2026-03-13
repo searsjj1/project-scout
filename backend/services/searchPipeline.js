@@ -440,44 +440,163 @@ export async function runMaintenance({
 }
 
 
+// ─── NAVIGATION / JUNK TEXT DETECTION ────────────────────────
+const NAV_JUNK_RE = [
+  /expand for details/i, /collapse for details/i, /click here/i,
+  /read more/i, /learn more/i, /view all/i, /see more/i,
+  /skip to (?:content|main|navigation)/i, /toggle navigation/i,
+  /breadcrumb/i, /footer/i, /sidebar/i, /cookie\s*(?:policy|consent)/i,
+  /privacy policy/i, /terms (?:of|and) (?:use|service)/i,
+  /copyright\s*©?\s*\d{4}/i, /all rights reserved/i,
+  /powered by/i, /site map/i, /sign in|log ?in|sign up/i,
+  /search results|page not found/i, /^\s*home\s*[|>\/]/i,
+];
+const PROJECT_WORDS_RE = /\b(renovation|addition|construction|expansion|improvement|upgrade|remodel|replacement|modernization|building|facility|project|design|study|plan|bond|levy|rfq|rfp|solicitation|bid|proposal|school|clinic|hospital|courthouse|library|terminal|hangar|housing|campus|water|sewer|bridge|park|fire station|police)\b/i;
+
+function isJunkText(text) {
+  if (!text || text.length < 15) return true;
+  for (const pat of NAV_JUNK_RE) { if (pat.test(text)) return true; }
+  if (!PROJECT_WORDS_RE.test(text)) return true;
+  return false;
+}
+
+/**
+ * Classify context as Active (solicitation) vs Watch (future signal).
+ */
+function classifyLeadType(context, matchedTerms) {
+  const lo = (context || '').toLowerCase();
+  const activePatterns = [
+    /\brfq\b/, /\brfp\b/, /\binvitation to bid\b/, /\brequest for (?:qualifications?|proposals?)\b/,
+    /\bsolicitation\b/, /\bcall for\b.*\bservices?\b/, /\bstatement of qualifications\b/,
+    /\bsubmit(?:tal)?\s+(?:by|before|due|deadline)\b/, /\bresponses?\s+(?:due|requested)\b/,
+    /\bselection\s+(?:process|committee|panel)\b/, /\bshortlist/,
+  ];
+  for (const p of activePatterns) {
+    if (p.test(lo)) return { leadClass: 'active_solicitation', status: 'active' };
+  }
+  const critKws = (matchedTerms || []).filter(k => /^(rfq|rfp|invitation to bid|design services|architect)$/i.test(k));
+  if (critKws.length >= 2) return { leadClass: 'active_solicitation', status: 'active' };
+  return { leadClass: 'watch_signal', status: 'new' };
+}
+
+/**
+ * Extract dates from context text.
+ */
+function extractDatesFromContext(context) {
+  const result = { action_due_date: '', potentialTimeline: '' };
+  if (!context) return result;
+  const duePats = [
+    /(?:due|deadline|submit(?:tal)?s?\s+(?:by|before)|responses?\s+(?:due|by)|closes?)\s*:?\s*(\w+\s+\d{1,2},?\s*\d{4})/i,
+    /(?:due|deadline|submit(?:tal)?s?\s+(?:by|before))\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i,
+  ];
+  for (const pat of duePats) {
+    const m = context.match(pat);
+    if (m) { const d = new Date(m[1]); if (!isNaN(d.getTime()) && d > new Date('2024-01-01')) { result.action_due_date = d.toISOString().split('T')[0]; break; } }
+  }
+  const tlPats = [
+    /(?:design\s+(?:start|begin)|a\/e\s+selection)\s*(?:in|by|:)?\s*(Q[1-4]\s*\d{4}|\w+\s*\d{4})/i,
+    /(?:construction\s+(?:start|begin))\s*(?:in|by|:)?\s*(Q[1-4]\s*\d{4}|\w+\s*\d{4})/i,
+    /(Q[1-4]\s*20[2-3]\d)/i,
+  ];
+  for (const pat of tlPats) {
+    const m = context.match(pat); if (m) { result.potentialTimeline = (m[1] || m[0]).trim(); break; }
+  }
+  return result;
+}
+
+/**
+ * Extract budget from context.
+ */
+function extractBudgetFromContext(context) {
+  if (!context) return '';
+  const pats = [
+    /\$\s*([\d,.]+)\s*(million|mil|m\b)/i,
+    /(?:budget|estimated\s+cost|project\s+cost)\s*(?:of|:)?\s*\$\s*([\d,.]+[mkb]?)/i,
+    /\$\s*([\d,]+(?:\.\d+)?)/,
+  ];
+  for (const pat of pats) {
+    const m = context.match(pat);
+    if (m) { const num = parseFloat((m[1] || '').replace(/,/g, '') || '0'); if (num >= 10000 || /million|mil|\dm\b/i.test(m[0])) return m[0].trim(); }
+  }
+  return '';
+}
+
 /**
  * Rule-based lead extraction (no AI required).
- * Extracts candidates from content using keyword patterns and structure.
+ * Improved: filters nav junk, classifies Active/Watch, extracts dates/budgets,
+ * builds richer descriptions and evidence.
  */
 function ruleBasedExtraction(content, source, matchedTerms) {
   if (!content) return [];
 
-  const leads = [];
-  const lower = content.toLowerCase();
+  // Clean nav/menu text before extraction
+  const cleaned = content
+    .replace(/(?:Skip to (?:content|main|navigation)|Toggle navigation)[^.]{0,50}/gi, '')
+    .replace(/(?:Expand|Collapse)\s+(?:for|all)\s+\w+/gi, '')
+    .replace(/(?:Copyright|©)\s*\d{4}[^.]{0,80}/gi, '');
 
-  // Look for project-like mentions: "[Entity] + [action term] + [project term]"
+  const leads = [];
+
   const projectPatterns = [
-    /(?:proposed|planned|approved|new|upcoming)\s+(?:construction|renovation|addition|building|facility|project|development|expansion)\b/gi,
-    /(?:rfq|rfp|invitation to bid|request for qualifications?)\s+(?:for|:)\s+([^.]{10,80})/gi,
-    /(?:capital improvement|bond|levy)\s+(?:plan|project|program)/gi,
-    /(?:design services?|architectural services?|engineering services?)\s+(?:for|needed|required)/gi,
+    /(?:rfq|rfp|invitation to bid|request for qualifications?)\s+(?:for|:|–|—)\s+([^.]{10,120})/gi,
+    /(?:design services?|architectural services?|engineering services?)\s+(?:for|needed|required|sought)[^.]{5,120}/gi,
+    /(?:proposed|planned|approved|upcoming|new)\s+(?:construction|renovation|addition|building|facility|project|development|expansion)\s+(?:of|for|at|on)\s+[^.]{10,120}/gi,
+    /(?:capital improvement|bond|levy)\s+(?:plan|project|program)[^.]{5,100}/gi,
+    /(?:renovation|construction|expansion|addition|modernization|replacement)\s+of\s+(?:the\s+)?[^.]{10,100}/gi,
   ];
 
   for (const pattern of projectPatterns) {
-    const matches = content.matchAll(pattern);
+    const matches = cleaned.matchAll(pattern);
     for (const match of matches) {
-      // Find surrounding context (the sentence containing the match)
       const idx = match.index;
-      const start = Math.max(0, content.lastIndexOf('.', idx) + 1);
-      const end = Math.min(content.length, content.indexOf('.', idx + match[0].length) + 1 || content.length);
-      const context = content.slice(start, end).trim();
+      const start = Math.max(0, cleaned.lastIndexOf('.', idx) + 1);
+      const end = Math.min(cleaned.length, cleaned.indexOf('.', idx + match[0].length) + 1 || cleaned.length);
+      const context = cleaned.slice(start, end).trim();
 
-      if (context.length > 30 && context.length < 500) {
-        leads.push({
-          title: generateTitleFromContext(context, source),
-          owner: source.organization || '',
-          description: context,
-          location: source.geography ? `${source.geography}, MT` : 'Western Montana',
-          marketSector: inferMarketSector(context),
-          projectType: inferProjectType(context),
-          signalStrength: matchedTerms.length > 3 ? 'strong' : 'medium',
-        });
+      if (context.length < 30 || context.length > 500) continue;
+      if (isJunkText(match[0])) continue;
+
+      // Extract a clean title
+      const quotedName = match[0].match(/[""]([^""]{10,80})[""]/);
+      const forClause = match[0].match(/(?:rfq|rfp|request for (?:qualifications?|proposals?))\s+(?:for|:|–|—)\s*([^.]{10,80})/i);
+      let title = '';
+      if (quotedName && !isJunkText(quotedName[1])) title = quotedName[1].trim();
+      else if (forClause && !isJunkText(forClause[1])) title = forClause[1].trim();
+      else {
+        const trimmed = match[0].replace(/\s+/g, ' ').trim();
+        if (trimmed.length <= 80 && !isJunkText(trimmed)) title = trimmed;
+        else {
+          const clauses = trimmed.split(/[;—–|]/);
+          for (const c of clauses) { if (c.trim().length > 15 && c.trim().length < 80 && !isJunkText(c.trim())) { title = c.trim(); break; } }
+        }
       }
+      if (!title || isJunkText(title)) {
+        const type = /rfq|rfp/i.test(match[0]) ? 'Solicitation' : /renovation|remodel/i.test(match[0]) ? 'Renovation Project'
+          : /addition|expansion/i.test(match[0]) ? 'Expansion Project' : /bond|levy/i.test(match[0]) ? 'Bond/Levy Program' : 'Project Signal';
+        title = `${source.organization || 'Unknown'} — ${type}`;
+      }
+
+      // Classify, extract dates/budget
+      const { leadClass, status } = classifyLeadType(context, matchedTerms);
+      const dates = extractDatesFromContext(context);
+      const budget = extractBudgetFromContext(context);
+
+      leads.push({
+        title,
+        owner: source.organization || '',
+        description: context,
+        whyItMatters: leadClass === 'active_solicitation'
+          ? `Active solicitation from ${source.category || 'source'} in ${source.geography || 'Montana'}. May require A/E response.`
+          : `Project signal from ${source.category || 'source'} in ${source.geography || 'Montana'}.`,
+        location: source.geography ? `${source.geography}, MT` : 'Montana',
+        marketSector: inferMarketSector(context),
+        projectType: inferProjectType(context),
+        signalStrength: leadClass === 'active_solicitation' ? 'strong' : (matchedTerms.length > 3 ? 'medium' : 'weak'),
+        leadClass, status,
+        potentialTimeline: dates.potentialTimeline,
+        potentialBudget: budget,
+        action_due_date: dates.action_due_date,
+      });
     }
   }
 
@@ -485,29 +604,37 @@ function ruleBasedExtraction(content, source, matchedTerms) {
   const uniqueLeads = [];
   const seen = new Set();
   for (const lead of leads) {
-    const key = lead.title.toLowerCase().slice(0, 40);
+    const key = lead.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
     if (!seen.has(key)) {
       seen.add(key);
       uniqueLeads.push(lead);
     }
   }
 
-  return uniqueLeads.slice(0, 5); // Cap per source
+  return uniqueLeads.slice(0, 5);
 }
 
 /**
  * Generate a lead title from context text.
+ * Improved: filters nav junk, prefers structured titles.
  */
 function generateTitleFromContext(context, source) {
-  // Try to extract a meaningful project name
   const trimmed = context.replace(/\s+/g, ' ').trim();
-  if (trimmed.length <= 80) return trimmed;
+  if (isJunkText(trimmed)) return `${source.organization || 'Unknown'} — Project Signal`;
 
-  // Take first meaningful clause
-  const clauses = trimmed.split(/[,;—–]/);
+  // Try to extract a named project
+  const quotedName = trimmed.match(/[""]([^""]{10,80})[""]/);
+  if (quotedName && !isJunkText(quotedName[1])) return quotedName[1].trim();
+
+  const forClause = trimmed.match(/(?:rfq|rfp|request for (?:qualifications?|proposals?))\s+(?:for|:|–|—)\s*([^.]{10,80})/i);
+  if (forClause && !isJunkText(forClause[1])) return forClause[1].trim();
+
+  if (trimmed.length <= 80 && !isJunkText(trimmed)) return trimmed;
+
+  const clauses = trimmed.split(/[,;—–|]/);
   for (const clause of clauses) {
     const c = clause.trim();
-    if (c.length > 15 && c.length < 80) return c;
+    if (c.length > 15 && c.length < 80 && !isJunkText(c)) return c;
   }
 
   return `${source.organization || 'Unknown'} — Project Signal`;
@@ -515,21 +642,23 @@ function generateTitleFromContext(context, source) {
 
 /**
  * Infer market sector from content.
+ * Improved: more specific patterns checked first.
  */
 function inferMarketSector(text) {
   const lower = text.toLowerCase();
-  if (/school|education|classroom|elementary|middle school|high school/.test(lower)) return 'K-12';
-  if (/university|college|campus|dormitor/.test(lower)) return 'Higher Education';
-  if (/hospital|clinic|medical|healthcare|outpatient/.test(lower)) return 'Healthcare';
-  if (/airport|terminal|hangar|aviation/.test(lower)) return 'Airports / Aviation';
-  if (/housing|apartment|multifamily|residential/.test(lower)) return 'Housing';
-  if (/courthouse|city hall|government|civic/.test(lower)) return 'Civic';
-  if (/fire station|police|public safety|911/.test(lower)) return 'Public Safety';
-  if (/water|wastewater|sewer|infrastructure/.test(lower)) return 'Infrastructure';
-  if (/tribal|reservation/.test(lower)) return 'Tribal';
-  if (/hotel|resort|recreation/.test(lower)) return 'Hospitality';
-  if (/retail|grocery|commercial/.test(lower)) return 'Commercial';
-  if (/lab|research|science/.test(lower)) return 'Research / Lab';
+  if (/\b(elementary|middle school|high school|classroom|gymnasium|school district|k-12)\b/.test(lower)) return 'K-12';
+  if (/\b(university|college|campus|dormitor|student housing|higher ed)\b/.test(lower)) return 'Higher Education';
+  if (/\b(hospital|medical center|clinic|outpatient|healthcare|urgent care|imaging|surgical)\b/.test(lower)) return 'Healthcare';
+  if (/\b(airport|terminal|hangar|aviation|runway)\b/.test(lower)) return 'Airports / Aviation';
+  if (/\b(fire station|police|public safety|911|dispatch|jail|detention)\b/.test(lower)) return 'Public Safety';
+  if (/\b(courthouse|city hall|government center|civic|municipal)\b/.test(lower)) return 'Civic';
+  if (/\b(library|community center|senior center|recreation|pool|aquatic|arena)\b/.test(lower)) return 'Recreation';
+  if (/\b(affordable housing|workforce housing|multifamily|apartment|residential|housing authority)\b/.test(lower)) return 'Housing';
+  if (/\b(tribal|reservation|indian)\b/.test(lower)) return 'Tribal';
+  if (/\b(water|wastewater|sewer|storm ?water|utility|treatment plant)\b/.test(lower)) return 'Infrastructure';
+  if (/\b(hotel|resort|lodge|hospitality)\b/.test(lower)) return 'Hospitality';
+  if (/\b(lab|laboratory|research|science)\b/.test(lower)) return 'Research / Lab';
+  if (/\b(retail|commercial|office|mixed.?use)\b/.test(lower)) return 'Commercial';
   return 'Other';
 }
 
@@ -538,19 +667,26 @@ function inferMarketSector(text) {
  */
 function inferProjectType(text) {
   const lower = text.toLowerCase();
-  if (/\brfq\b|\brfp\b|invitation to bid/.test(lower)) return 'RFQ/RFP';
-  if (/master plan|strategic plan|feasibility/.test(lower)) return 'Master Plan';
-  if (/bond|levy/.test(lower)) return 'Bond';
-  if (/addition|expansion|extend/.test(lower)) return 'Addition';
-  if (/renovation|remodel|upgrade|retrofit/.test(lower)) return 'Renovation';
-  if (/new construction|new building|new facility/.test(lower)) return 'New Construction';
+  if (/\brfq\b|\brfp\b|\binvitation to bid\b|\bsolicitation\b/.test(lower)) return 'RFQ/RFP';
+  if (/\bmaster plan\b|\bstrategic plan\b|\bfeasibility\b|\bstudy\b/.test(lower)) return 'Master Plan';
+  if (/\bbond\b|\blevy\b/.test(lower)) return 'Bond';
+  if (/\baddition\b|\bexpansion\b|\bextend\b/.test(lower)) return 'Addition';
+  if (/\brenovation\b|\bremodel\b|\bupgrade\b|\bretrofit\b|\breplacement\b/.test(lower)) return 'Renovation';
+  if (/\bnew construction\b|\bnew building\b|\bnew facility\b/.test(lower)) return 'New Construction';
+  if (/\bcapital improvement\b|\bcip\b/.test(lower)) return 'Capital Improvement';
   return 'Other';
 }
 
 /**
  * Build a complete lead record from a scored candidate.
+ * Improved: includes leadClass, action_due_date, richer whyItMatters.
  */
 function buildLeadRecord(candidate) {
+  // Determine Active vs Watch classification if not already set
+  const classification = candidate.leadClass
+    ? { leadClass: candidate.leadClass, status: candidate.status || 'new' }
+    : classifyLeadType(candidate.description || candidate.title || '', candidate._matchedTerms || []);
+
   return {
     id: `lead-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     title: candidate.title || 'Untitled Lead',
@@ -566,6 +702,7 @@ function buildLeadRecord(candidate) {
     aiReasonForAddition: candidate.aiReasonForAddition || '',
     potentialTimeline: candidate.potentialTimeline || '',
     potentialBudget: candidate.potentialBudget || '',
+    action_due_date: candidate.action_due_date || '',
     relevanceScore: candidate.relevanceScore || 0,
     pursuitScore: candidate.pursuitScore || 0,
     sourceConfidenceScore: candidate.sourceConfidenceScore || 0,
@@ -573,14 +710,16 @@ function buildLeadRecord(candidate) {
     dateDiscovered: new Date().toISOString(),
     originalSignalDate: candidate.originalSignalDate || new Date().toISOString(),
     lastCheckedDate: new Date().toISOString(),
-    status: 'new',
+    status: classification.status,
+    leadClass: classification.leadClass,
+    leadOrigin: candidate.leadOrigin || 'pipeline',
     sourceName: candidate.sourceName || '',
     sourceUrl: candidate.sourceUrl || '',
     sourceId: candidate.sourceId || '',
     evidenceLinks: candidate.sourceUrl ? [candidate.sourceUrl] : [],
     evidenceSummary: '',
     matchedFocusPoints: candidate.matchedFocusPoints || [],
-    matchedKeywords: candidate.matchedKeywords || [],
+    matchedKeywords: candidate.matchedKeywords || candidate._matchedTerms || [],
     matchedTargetOrgs: candidate.matchedTargetOrgs || [],
     internalContact: '',
     notes: '',
