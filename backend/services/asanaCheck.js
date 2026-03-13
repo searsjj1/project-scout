@@ -51,12 +51,22 @@ function normalize(text) {
 }
 
 /**
- * Word-overlap similarity (0-1).
+ * Stop words that inflate similarity on short titles.
+ */
+const STOP_WORDS = new Set(['the','and','for','from','with','this','that','are','was','will','has','have','been','its','our','new','all','project','county','city','state','montana']);
+
+function significantWords(text) {
+  return normalize(text).split(' ').filter(w => w.length > 2 && !STOP_WORDS.has(w));
+}
+
+/**
+ * Word-overlap similarity (0-1) using significant words only.
+ * Requires at least 2 significant words on each side to avoid spurious matches.
  */
 function similarity(a, b) {
-  const wa = new Set(normalize(a).split(' ').filter(w => w.length > 2));
-  const wb = new Set(normalize(b).split(' ').filter(w => w.length > 2));
-  if (!wa.size || !wb.size) return 0;
+  const wa = new Set(significantWords(a));
+  const wb = new Set(significantWords(b));
+  if (wa.size < 2 || wb.size < 2) return 0;
   let inter = 0;
   for (const w of wa) if (wb.has(w)) inter++;
   return inter / new Set([...wa, ...wb]).size;
@@ -64,7 +74,13 @@ function similarity(a, b) {
 
 /**
  * Check active leads against Asana board tasks.
- * Returns array of { lead, asanaTask, confidence } matches.
+ * Returns array of { lead, asanaTask, confidence, matchType } matches.
+ *
+ * Match tiers (tightened to reduce false positives):
+ *   1. Exact normalized title match → 0.95 confidence
+ *   2. Near-exact (one contains the other, shorter ≥4 words) → 0.90
+ *   3. Fuzzy similarity ≥ 0.65 (raised from 0.5) → similarity score
+ *   Removed: owner+partial (too many false positives with common org names)
  */
 export async function checkLeadsAgainstAsana(activeLeads, settings) {
   const tasks = await fetchAsanaTasks(settings);
@@ -72,31 +88,28 @@ export async function checkLeadsAgainstAsana(activeLeads, settings) {
 
   for (const lead of activeLeads) {
     const leadNorm = normalize(lead.title);
-    const ownerNorm = normalize(lead.owner);
 
     for (const task of tasks) {
       const taskNorm = normalize(task.name);
 
-      // Exact title match
-      if (leadNorm === taskNorm || taskNorm.includes(leadNorm) || leadNorm.includes(taskNorm)) {
-        matches.push({ lead, asanaTask: task, confidence: 0.95, matchType: 'title' });
+      // Tier 1: Exact normalized match
+      if (leadNorm === taskNorm) {
+        matches.push({ lead, asanaTask: task, confidence: 0.95, matchType: 'exact' });
         break;
       }
 
-      // Fuzzy title match
+      // Tier 2: Near-exact containment (shorter side must have ≥4 words to avoid substring spam)
+      if ((taskNorm.includes(leadNorm) || leadNorm.includes(taskNorm)) &&
+          Math.min(leadNorm.split(' ').length, taskNorm.split(' ').length) >= 4) {
+        matches.push({ lead, asanaTask: task, confidence: 0.90, matchType: 'near_exact' });
+        break;
+      }
+
+      // Tier 3: Fuzzy match with tighter threshold
       const sim = similarity(lead.title, task.name);
-      if (sim > 0.5) {
+      if (sim >= 0.65) {
         matches.push({ lead, asanaTask: task, confidence: sim, matchType: 'fuzzy' });
         break;
-      }
-
-      // Owner + partial title match
-      if (ownerNorm && taskNorm.includes(ownerNorm)) {
-        const titleSim = similarity(lead.title, task.name);
-        if (titleSim > 0.3) {
-          matches.push({ lead, asanaTask: task, confidence: 0.6 + titleSim * 0.3, matchType: 'owner+partial' });
-          break;
-        }
       }
     }
   }
@@ -127,7 +140,8 @@ export async function runDailyAsanaCheck(activeLeads, settings, onLog = console.
       leadId: m.lead.id,
       taskName: m.asanaTask.name,
       taskGid: m.asanaTask.gid || null,
-      taskUrl: m.asanaTask.permalink_url || `https://app.asana.com/0/1203575716271060/${m.asanaTask.gid}`,
+      taskUrl: m.asanaTask.permalink_url || '',
+      taskUrlIsPermalink: !!m.asanaTask.permalink_url,
       confidence: m.confidence,
       matchType: m.matchType,
       dateFoundInAsana: new Date().toISOString(),

@@ -9,7 +9,31 @@ import SourceRegistryView from './components/SourceRegistryView.jsx';
    SEED DATA (inline for artifact portability)
    ═══════════════════════════════════════════════════════════════ */
 
-const LEAD_STATUS = { NEW: 'new', ACTIVE: 'active', MONITORING: 'monitoring', SUBMITTED_TO_ASANA: 'submitted_to_asana', NOT_PURSUED: 'not_pursued' };
+const LEAD_STATUS = { NEW: 'new', ACTIVE: 'active', WATCH: 'watch', MONITORING: 'monitoring', SUBMITTED_TO_ASANA: 'submitted_to_asana', NOT_PURSUED: 'not_pursued' };
+
+// New is a 7-day freshness flag, not a primary status. After 7 days, leads show only their operational status.
+const NEW_FRESHNESS_DAYS = 7;
+
+function isNewFresh(lead) {
+  if (!lead.dateDiscovered) return false;
+  const age = (Date.now() - new Date(lead.dateDiscovered).getTime()) / 86400000;
+  return age <= NEW_FRESHNESS_DAYS;
+}
+
+/**
+ * Derive the operational status for display.
+ * "New" is only shown as a secondary badge if the lead is < 7 days old.
+ * The primary status is always Active or Watch (or legacy Monitoring → Watch).
+ */
+function getOperationalStatus(lead) {
+  const fresh = isNewFresh(lead);
+  // Map legacy statuses: 'new' → watch (was the default for non-solicitation), 'monitoring' → watch
+  let primary = lead.status;
+  if (primary === LEAD_STATUS.NEW || primary === LEAD_STATUS.MONITORING) {
+    primary = LEAD_STATUS.WATCH;
+  }
+  return { primary, isNew: fresh };
+}
 
 const MARKET_SECTORS = ['Civic','Municipal','County','State','Public Safety','K-12','Higher Education','Healthcare','Clinics','Research / Lab','Airports / Aviation','Tribal','Housing','Workforce Housing','Affordable Housing','Mixed Use','Hospitality','Recreation','Infrastructure','Landscape','Utility','Commercial','Retail','Industrial','Developer-Led'];
 
@@ -179,9 +203,10 @@ function scoreColor(score) {
 
 function statusBadge(status) {
   const map = {
-    [LEAD_STATUS.NEW]: { label: 'New', bg: '#dbeafe', fg: '#1e40af' },
+    [LEAD_STATUS.NEW]: { label: 'Watch', bg: '#fef3c7', fg: '#92400e' }, // Legacy 'new' → treated as Watch
     [LEAD_STATUS.ACTIVE]: { label: 'Active', bg: '#d1fae5', fg: '#065f46' },
-    [LEAD_STATUS.MONITORING]: { label: 'Monitoring', bg: '#fef3c7', fg: '#92400e' },
+    [LEAD_STATUS.WATCH]: { label: 'Watch', bg: '#fef3c7', fg: '#92400e' },
+    [LEAD_STATUS.MONITORING]: { label: 'Watch', bg: '#fef3c7', fg: '#92400e' }, // Legacy monitoring → Watch
     [LEAD_STATUS.SUBMITTED_TO_ASANA]: { label: 'In Asana', bg: '#e0e7ff', fg: '#3730a3' },
     [LEAD_STATUS.NOT_PURSUED]: { label: 'Not Pursued', bg: '#f3f4f6', fg: '#6b7280' },
   };
@@ -284,18 +309,19 @@ function UrgencyRing({ dueDate, size = 44, strokeWidth = 3.5 }) {
    ═══════════════════════════════════════════════════════════════ */
 
 function LeadCard({ lead, onClick, style: animStyle }) {
-  const badge = statusBadge(lead.status);
+  const { primary, isNew } = getOperationalStatus(lead);
+  const badge = statusBadge(primary);
   const discovered = daysAgo(lead.dateDiscovered);
 
   return (
     <div onClick={onClick} style={{
       background: '#fff', borderRadius: 14, padding: '20px 22px', cursor: 'pointer',
-      border: '1px solid #eef0f4', transition: 'all 0.22s cubic-bezier(.4,0,.2,1)',
-      boxShadow: '0 1px 2px rgba(0,0,0,0.03), 0 1px 6px rgba(0,0,0,0.02)',
+      border: isNew ? '1px solid #93c5fd' : '1px solid #eef0f4', transition: 'all 0.22s cubic-bezier(.4,0,.2,1)',
+      boxShadow: isNew ? '0 1px 4px rgba(59,130,246,0.08), 0 1px 6px rgba(0,0,0,0.02)' : '0 1px 2px rgba(0,0,0,0.03), 0 1px 6px rgba(0,0,0,0.02)',
       ...animStyle,
     }}
     onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)'; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = '#dde1e8'; }}
-    onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.03), 0 1px 6px rgba(0,0,0,0.02)'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = '#eef0f4'; }}
+    onMouseLeave={e => { e.currentTarget.style.boxShadow = isNew ? '0 1px 4px rgba(59,130,246,0.08), 0 1px 6px rgba(0,0,0,0.02)' : '0 1px 2px rgba(0,0,0,0.03), 0 1px 6px rgba(0,0,0,0.02)'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = isNew ? '#93c5fd' : '#eef0f4'; }}
     >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
@@ -303,10 +329,19 @@ function LeadCard({ lead, onClick, style: animStyle }) {
           <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0, lineHeight: 1.35, letterSpacing: '-0.01em' }}>{lead.title}</h3>
           <p style={{ fontSize: 12.5, color: '#64748b', margin: '3px 0 0', fontWeight: 500 }}>{lead.owner}</p>
         </div>
-        <span style={{
-          fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
-          background: badge.bg, color: badge.fg, whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '0.04em',
-        }}>{badge.label}</span>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+          {isNew && (
+            <span style={{
+              fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+              background: '#dbeafe', color: '#1e40af',
+              textTransform: 'uppercase', letterSpacing: '0.04em',
+            }}>NEW</span>
+          )}
+          <span style={{
+            fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
+            background: badge.bg, color: badge.fg, whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '0.04em',
+          }}>{badge.label}</span>
+        </div>
         {lead.leadOrigin === 'manual' && (
           <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
             background: '#dbeafe', color: '#1e40af',
@@ -354,7 +389,8 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
   // Sync form when lead prop changes (e.g. clicking different lead, or after save)
   useEffect(() => { setForm({ ...lead }); setEditing(false); }, [lead?.id]);
   if (!lead) return null;
-  const badge = statusBadge(lead.status);
+  const { primary: opStatus, isNew: opIsNew } = getOperationalStatus(lead);
+  const badge = statusBadge(opStatus);
   const isNotPursued = lead.status === LEAD_STATUS.NOT_PURSUED;
   const isSubmitted = lead.status === LEAD_STATUS.SUBMITTED_TO_ASANA;
   const tabs = [
@@ -378,6 +414,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+              {opIsNew && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>NEW</span>}
               <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6, background: badge.bg, color: badge.fg, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{badge.label}</span>
               {lead.marketSector && <span style={{ fontSize: 10, padding: '3px 7px', borderRadius: 5, background: '#f1f5f9', color: '#64748b' }}>{lead.marketSector}</span>}
               {lead.projectType && <span style={{ fontSize: 10, padding: '3px 7px', borderRadius: 5, background: '#f1f5f9', color: '#64748b' }}>{lead.projectType}</span>}
@@ -403,14 +440,14 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
             <button onClick={() => onMoveToNotPursued(lead.id)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #fecaca', background: '#fff', color: '#dc2626', cursor: 'pointer', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
               <Archive size={11} /> Not Pursuing
             </button>
-            {lead.status !== LEAD_STATUS.ACTIVE && (
+            {opStatus !== LEAD_STATUS.ACTIVE && (
               <button onClick={() => onUpdate({ ...lead, status: LEAD_STATUS.ACTIVE })} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', color: '#475569', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
                 Mark Active
               </button>
             )}
-            {lead.status !== LEAD_STATUS.MONITORING && lead.status === LEAD_STATUS.ACTIVE && (
-              <button onClick={() => onUpdate({ ...lead, status: LEAD_STATUS.MONITORING })} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', color: '#475569', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
-                Monitor
+            {opStatus === LEAD_STATUS.ACTIVE && (
+              <button onClick={() => onUpdate({ ...lead, status: LEAD_STATUS.WATCH })} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', color: '#475569', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                Move to Watch
               </button>
             )}
           </div>
@@ -745,15 +782,21 @@ function DetailField({ icon, label, value }) {
    ═══════════════════════════════════════════════════════════════ */
 
 function StatsBar({ leads }) {
-  const newCount = leads.filter(l => l.status === LEAD_STATUS.NEW).length;
-  const activeCount = leads.filter(l => l.status === LEAD_STATUS.ACTIVE).length;
-  const monitorCount = leads.filter(l => l.status === LEAD_STATUS.MONITORING).length;
+  const freshCount = leads.filter(l => isNewFresh(l)).length;
+  const activeCount = leads.filter(l => {
+    const { primary } = getOperationalStatus(l);
+    return primary === LEAD_STATUS.ACTIVE;
+  }).length;
+  const watchCount = leads.filter(l => {
+    const { primary } = getOperationalStatus(l);
+    return primary === LEAD_STATUS.WATCH;
+  }).length;
   const withDueDate = leads.filter(l => l.action_due_date).length;
   const stats = [
     { label: 'Total Leads', value: leads.length, icon: <BarChart3 size={15} />, color: '#3b82f6' },
-    { label: 'New', value: newCount, icon: <Zap size={15} />, color: '#10b981' },
-    { label: 'Active', value: activeCount, icon: <Activity size={15} />, color: '#0f172a' },
-    { label: 'Monitoring', value: monitorCount, icon: <Eye size={15} />, color: '#f59e0b' },
+    { label: 'New (7d)', value: freshCount, icon: <Zap size={15} />, color: '#3b82f6' },
+    { label: 'Active', value: activeCount, icon: <Activity size={15} />, color: '#065f46' },
+    { label: 'Watch', value: watchCount, icon: <Eye size={15} />, color: '#92400e' },
     { label: 'With Due Date', value: withDueDate, icon: <Clock size={15} />, color: '#6366f1' },
   ];
   return (
@@ -796,7 +839,10 @@ function ActiveLeadsTab({ leads, onSelectLead }) {
     }
     if (sectorFilter !== 'all') result = result.filter(l => l.marketSector === sectorFilter);
     if (geoFilter !== 'all') result = result.filter(l => l.geography === geoFilter);
-    result.sort((a, b) => {
+
+    // Operational ordering: New Active > Active > New Watch > Watch
+    // Within each group, sort by the selected secondary sort
+    const secondarySort = (a, b) => {
       if (sortBy === 'relevance') return (b.relevanceScore||0) - (a.relevanceScore||0);
       if (sortBy === 'newest') return new Date(b.dateDiscovered) - new Date(a.dateDiscovered);
       if (sortBy === 'duedate') {
@@ -809,6 +855,21 @@ function ActiveLeadsTab({ leads, onSelectLead }) {
         return extractNum(b.potentialBudget) - extractNum(a.potentialBudget);
       }
       return 0;
+    };
+
+    // Board group rank: 0=New Active, 1=Active, 2=New Watch, 3=Watch
+    const boardRank = (lead) => {
+      const { primary, isNew } = getOperationalStatus(lead);
+      if (primary === LEAD_STATUS.ACTIVE && isNew) return 0;
+      if (primary === LEAD_STATUS.ACTIVE) return 1;
+      if (isNew) return 2; // New Watch
+      return 3; // Watch
+    };
+
+    result.sort((a, b) => {
+      const ra = boardRank(a), rb = boardRank(b);
+      if (ra !== rb) return ra - rb;
+      return secondarySort(a, b);
     });
     return result;
   }, [leads, search, sectorFilter, geoFilter, sortBy]);
@@ -834,10 +895,10 @@ function ActiveLeadsTab({ leads, onSelectLead }) {
           {geos.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
         <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={selectStyle}>
-          <option value="relevance">Sort: Relevance</option>
-          <option value="newest">Sort: Newest</option>
-          <option value="duedate">Sort: Action Due</option>
-          <option value="budget">Sort: Budget</option>
+          <option value="relevance">Within Group: Relevance</option>
+          <option value="newest">Within Group: Newest</option>
+          <option value="duedate">Within Group: Action Due</option>
+          <option value="budget">Within Group: Budget</option>
         </select>
       </div>
 
@@ -2674,7 +2735,7 @@ export default function ProjectScout() {
     const newLead = {
       ...lead,
       id: lead.id || `lead-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
-      status: lead.status || LEAD_STATUS.NEW,
+      status: lead.status || LEAD_STATUS.WATCH,
       leadOrigin: lead.leadOrigin || 'manual',
       dateDiscovered: lead.dateDiscovered || new Date().toISOString(),
       lastCheckedDate: new Date().toISOString(),
@@ -3137,10 +3198,14 @@ export default function ProjectScout() {
                     {match.asana_section && (
                       <span style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#f1f5f9', color:'#64748b' }}>{match.asana_section}</span>
                     )}
-                    {match.taskUrl && (
+                    {match.taskUrl ? (
                       <a href={match.taskUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize:10.5, fontWeight:600, padding:'2px 7px', borderRadius:4, background:'#ede9fe', color:'#5b21b6', textDecoration:'none', display:'flex', alignItems:'center', gap:3 }}>
                         <ExternalLink size={9}/> View in Asana
                       </a>
+                    ) : (
+                      <span style={{ fontSize:10, fontWeight:500, padding:'2px 7px', borderRadius:4, background:'#f8fafc', color:'#94a3b8', fontStyle:'italic' }}>
+                        No direct link available
+                      </span>
                     )}
                   </div>
                   {/* Asana context details */}

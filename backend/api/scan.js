@@ -172,6 +172,8 @@ function classifyActiveWatch(ctx, kws) {
     /\bresponses?\s+(?:due|requested|accepted)\b/,
     /\bselection\s+(?:process|committee|panel)\b/,
     /\bshortlist/,
+    /\brequest for a\/e\b/, /\brequest for architect/,
+    /\bqualification.based\s+selection\b/, /\bqbs\b/,
   ];
   for (const p of activePhrases) {
     if (p.test(lo)) return { leadClass: 'active_solicitation', status: 'active' };
@@ -180,8 +182,37 @@ function classifyActiveWatch(ctx, kws) {
   const criticalKws = (kws || []).filter(k => /^(rfq|rfp|invitation to bid|design services|architect)$/i.test(k));
   if (criticalKws.length >= 2) return { leadClass: 'active_solicitation', status: 'active' };
 
-  // Everything else is Watch
-  return { leadClass: 'watch_signal', status: 'new' };
+  // Everything else is Watch — future project, budget item, planning signal
+  return { leadClass: 'watch_signal', status: 'watch' };
+}
+
+/**
+ * Noise suppression: detect items that are clearly not real A&E pursuit leads.
+ * Returns true if the candidate should be suppressed.
+ */
+function isNoiseLead(title, ctx, src) {
+  const lo = (title || '').toLowerCase();
+  const ctxLo = (ctx || '').toLowerCase();
+
+  // Printable maps, bid map pages, generic map/GIS content
+  if (/\b(printable map|bid map|interactive map|gis viewer|map viewer|plat map)\b/.test(lo)) return true;
+  if (/\b(printable map|bid map|interactive map|gis viewer|map viewer)\b/.test(ctxLo) && !/\b(project|facility|building|renovation|construction)\b/.test(ctxLo)) return true;
+
+  // Generic archive/reference/index pages
+  if (/\b(archive|archived|back issues?|past (meetings?|agendas?|minutes))\b/.test(lo) && lo.length < 60) return true;
+
+  // Generic category/listing pages without a distinct project
+  if (/\b(bid results|bid tabulation|plan holders?|planholders? list|vendor list|bidder list)\b/.test(lo)) return true;
+  if (/\b(all (bids|rfps?|rfqs?|solicitations?))\b/.test(lo) && !/\bfor\b/.test(lo)) return true;
+
+  // Non-A&E supply/contractor notices
+  if (/\b(janitorial|custodial|mowing|snow removal|snow plow|fuel (bid|contract)|office supplies|copier|vehicle (bid|purchase)|fleet|uniform)\b/.test(ctxLo)) return true;
+  if (/\b(food service|catering|vending|pest control|elevator maintenance|hvac maintenance contract)\b/.test(ctxLo) && !/\b(design|renovation|construction|addition|facility)\b/.test(ctxLo)) return true;
+
+  // Extremely short/generic titles that slipped through junk filter
+  if (/^(home|about|news|events|contact|board|staff|resources|documents|calendar|agenda|minutes)$/i.test(lo.trim())) return true;
+
+  return false;
 }
 
 /**
@@ -465,6 +496,9 @@ function extractLeads(content, src, kws, fps, orgs) {
     // Skip if title is still junk after cleanup
     if (isNavigationJunk(title) || title.length < 10) continue;
 
+    // Noise suppression: skip items that are clearly not A&E pursuit leads
+    if (isNoiseLead(title, fullContext, src)) continue;
+
     // Classify Active vs Watch
     const { leadClass, status } = classifyActiveWatch(fullContext, kws);
 
@@ -658,10 +692,13 @@ export default async function handler(req, res) {
       log(`Asana: ${tasks.length} tasks`);
 
       const norm = t => (t||'').toLowerCase().replace(/[^a-z0-9\s]/g,'').replace(/\s+/g,' ').trim();
+      // Stop words that inflate Jaccard similarity on short titles
+      const STOP_WORDS = new Set(['the','and','for','from','with','this','that','are','was','will','has','have','been','its','our','new','all','project','county','city','state','montana']);
+      const significantWords = (text) => norm(text).split(' ').filter(w => w.length > 2 && !STOP_WORDS.has(w));
       const wsim = (a,b) => {
-        const wa=new Set(norm(a).split(' ').filter(w=>w.length>2));
-        const wb=new Set(norm(b).split(' ').filter(w=>w.length>2));
-        if(!wa.size||!wb.size) return 0;
+        const wa=new Set(significantWords(a));
+        const wb=new Set(significantWords(b));
+        if(wa.size < 2 || wb.size < 2) return 0; // Require at least 2 significant words each
         let i=0; for(const w of wa) if(wb.has(w)) i++;
         return i / new Set([...wa,...wb]).size;
       };
@@ -676,22 +713,33 @@ export default async function handler(req, res) {
         for (const task of tasks) {
           const na=norm(lead.title), nb=norm(task.name);
           let hit = null;
-          if (na===nb || nb.includes(na) || na.includes(nb)) {
+          // Exact match: normalized titles are identical
+          if (na === nb) {
             hit = { confidence:0.95, matchType:'exact' };
             log(`  ✓ EXACT: "${lead.title}" → "${task.name}"`);
-          } else {
+          }
+          // Near-exact: one fully contains the other AND the shorter has 4+ words
+          else if ((nb.includes(na) || na.includes(nb)) && Math.min(na.split(' ').length, nb.split(' ').length) >= 4) {
+            hit = { confidence:0.90, matchType:'near_exact' };
+            log(`  ✓ NEAR-EXACT: "${lead.title}" → "${task.name}"`);
+          }
+          // Fuzzy: raised threshold from 0.5 to 0.65 to reduce false positives
+          else {
             const s = wsim(lead.title, task.name);
-            if (s > 0.5) {
+            if (s >= 0.65) {
               hit = { confidence:Math.round(s*100)/100, matchType:'fuzzy' };
               log(`  ~ FUZZY (${Math.round(s*100)}%): "${lead.title}" → "${task.name}"`);
             }
           }
           if (hit) {
+            // Use permalink_url if available; otherwise mark as board-level link (not a direct task link)
+            const hasPermalink = !!(task.permalink_url);
             matches.push({
               leadId: lead.id,
               taskName: task.name,
               taskGid: task.gid || null,
-              taskUrl: task.permalink_url || '',
+              taskUrl: hasPermalink ? task.permalink_url : '',
+              taskUrlIsPermalink: hasPermalink,
               confidence: hit.confidence,
               matchType: hit.matchType,
               // Richer Asana context for history display

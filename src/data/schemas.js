@@ -18,7 +18,7 @@ export const KEYS = {
   MIGRATION:         'ps_migration',
 };
 
-export const LEAD_STATES = ['preliminary','active','go_no_go_submitted','not_pursued'];
+export const LEAD_STATES = ['preliminary','active','watch','go_no_go_submitted','not_pursued'];
 export const LEAD_CLASSES = ['standard','upcoming_budgeted_project'];
 export const TIERS = ['Tier 1','Tier 2','Tier 3'];
 export const CHECK_FREQUENCIES = ['Daily','3x/week','Weekly','Biweekly','Monthly','Quarterly'];
