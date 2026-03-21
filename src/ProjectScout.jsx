@@ -5426,7 +5426,28 @@ export default function ProjectScout() {
         if (!ok) return;
 
         const sharedData = data || {};
-        let bootstrapped = 0, restored = 0, pushed = 0;
+        let bootstrapped = 0, restored = 0, merged = 0;
+
+        // ID-aware merge: combine shared and local by lead ID.
+        // Shared records for IDs not in local are ADDED (changes from other sessions).
+        // Local records for IDs in both are KEPT (current session edits preserved).
+        // Local records for IDs not in shared are KEPT (new local work).
+        const mergeById = (localArr, sharedArr) => {
+          if (!Array.isArray(localArr)) localArr = [];
+          if (!Array.isArray(sharedArr)) sharedArr = [];
+          const localIds = new Set(localArr.map(item => item.id).filter(Boolean));
+          // Start with all local items
+          const result = [...localArr];
+          // Add shared items whose IDs are NOT in local (additions from other sessions)
+          let added = 0;
+          for (const item of sharedArr) {
+            if (item.id && !localIds.has(item.id)) {
+              result.push(item);
+              added++;
+            }
+          }
+          return { merged: result, added };
+        };
 
         for (const key of SHARED_KEYS) {
           const fullKey = `ps_${key}`;
@@ -5450,14 +5471,51 @@ export default function ProjectScout() {
             restored++;
             console.log(`[Shared Store] Restored: loaded ${sharedLen} ${key} items from shared store (local was empty)`);
           } else if (sharedLen > 0 && localLen > 0) {
-            // Both have data → keep local (current session truth), push to shared
-            saveToSharedStore(key, localValue);
-            pushed++;
-            console.log(`[Shared Store] Sync: local ${key} (${localLen} items) pushed to shared (had ${sharedLen}). Local is authority.`);
+            // Both have data → ID-aware merge (preserves additions from other sessions)
+            const { merged: mergedValue, added } = mergeById(localValue, sharedValue);
+            if (added > 0) {
+              // Shared had items local didn't — merge them in
+              saveState(key, mergedValue);
+              if (key === 'leads') setLeads(mergedValue);
+              else if (key === 'submitted') setSubmittedLeads(mergedValue);
+              else if (key === 'notpursued') setNotPursuedLeads(mergedValue);
+              else if (key === 'pruning_review_queue') setPruningReviewQueue(mergedValue);
+              console.log(`[Shared Store] Merged: ${key} — added ${added} items from shared (local had ${localLen}, shared had ${sharedLen}, merged: ${mergedValue.length})`);
+            } else {
+              console.log(`[Shared Store] In sync: ${key} — local (${localLen}) and shared (${sharedLen}) have same IDs`);
+            }
+            // Push merged result back to shared
+            saveToSharedStore(key, added > 0 ? mergedValue : localValue);
+            merged++;
           }
           // Both empty → nothing to do
         }
-        console.log(`[Shared Store] Initial sync complete — bootstrapped: ${bootstrapped}, restored: ${restored}, pushed: ${pushed}`);
+        // ── Cross-list reconciliation ──
+        // When a lead is moved between lists (e.g., leads → notpursued) in another session,
+        // this session's stale local state may still have the lead in the old list.
+        // Remove IDs that appear in a "destination" list from their "source" lists.
+        const reconcileLists = () => {
+          const currentLeads = loadState('leads', []);
+          const currentNP = loadState('notpursued', []);
+          const currentSubmitted = loadState('submitted', []);
+
+          // IDs in Not Pursued should not also be in leads
+          const npIds = new Set(currentNP.map(l => l.id).filter(Boolean));
+          // IDs in Submitted should not also be in leads
+          const subIds = new Set(currentSubmitted.map(l => l.id).filter(Boolean));
+
+          const cleanedLeads = currentLeads.filter(l => !npIds.has(l.id) && !subIds.has(l.id));
+          if (cleanedLeads.length < currentLeads.length) {
+            const removed = currentLeads.length - cleanedLeads.length;
+            console.log(`[Shared Store] Cross-list reconciliation: removed ${removed} lead(s) from Active/Watch that exist in Not Pursued or Submitted`);
+            saveState('leads', cleanedLeads);
+            setLeads(cleanedLeads);
+            saveToSharedStore('leads', cleanedLeads);
+          }
+        };
+        reconcileLists();
+
+        console.log(`[Shared Store] Initial sync complete — bootstrapped: ${bootstrapped}, restored: ${restored}, merged: ${merged}`);
       } catch (err) {
         console.warn('[Shared Store] Initial load failed:', err.message);
       }
