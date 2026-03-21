@@ -5334,6 +5334,7 @@ export default function ProjectScout() {
   const [sharedStoreStatus, setSharedStoreStatus] = useState('checking'); // 'checking' | 'connected' | 'local-only' | 'error'
   const sharedSyncTimers = useRef({});
   const sharedStoreUrl = useRef(null);
+  const sharedSyncReady = useRef(false); // Suppresses writes until initial sync completes
 
   // Resolve the store API URL from settings
   // Uses the same backendEndpoint as scan/Asana calls (e.g. https://project-scout-api.vercel.app)
@@ -5352,8 +5353,12 @@ export default function ProjectScout() {
   }, []);
 
   // Save to shared store (debounced, fire-and-forget)
+  // IMPORTANT: Writes are suppressed until initial sync completes (sharedSyncReady).
+  // Without this guard, mount-time save effects fire with stale/empty initial state
+  // and their debounced writes race with the initial sync, overwriting shared data.
   const saveToSharedStore = useCallback((key, data) => {
     if (!SHARED_KEYS.has(key)) return;
+    if (!sharedSyncReady.current) return; // Suppress until initial sync done
     const url = getStoreUrl();
     if (!url) return;
 
@@ -5383,6 +5388,7 @@ export default function ProjectScout() {
     const url = getStoreUrl();
     if (!url) {
       setSharedStoreStatus('local-only');
+      sharedSyncReady.current = true; // No shared store → writes are safe (they'll no-op)
       console.log('[Shared Store] No backend URL configured — using local-only persistence');
       return;
     }
@@ -5396,13 +5402,16 @@ export default function ProjectScout() {
             console.log(`[Shared Store] ✓ Connected (${data.storeType}), build: ${data.build}`);
           } else if (data.ok) {
             setSharedStoreStatus('local-only');
+            sharedSyncReady.current = true;
             console.log('[Shared Store] Store API reachable but Upstash not configured — using local-only');
           }
         } else {
           setSharedStoreStatus('local-only');
+          sharedSyncReady.current = true;
         }
       } catch {
         setSharedStoreStatus('local-only');
+        sharedSyncReady.current = true;
         console.log('[Shared Store] Store API unreachable — using local-only persistence');
       }
     })();
@@ -5516,8 +5525,11 @@ export default function ProjectScout() {
         reconcileLists();
 
         console.log(`[Shared Store] Initial sync complete — bootstrapped: ${bootstrapped}, restored: ${restored}, merged: ${merged}`);
+        sharedSyncReady.current = true;
+        console.log('[Shared Store] Sync ready — shared writes now enabled');
       } catch (err) {
         console.warn('[Shared Store] Initial load failed:', err.message);
+        sharedSyncReady.current = true; // Enable writes even on failure so user actions persist
       }
     })();
   }, [sharedStoreStatus]); // eslint-disable-line react-hooks/exhaustive-deps
