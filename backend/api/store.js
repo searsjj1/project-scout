@@ -47,16 +47,28 @@ function getRedis() {
       });
       if (!resp.ok) throw new Error(`Upstash GET failed: ${resp.status}`);
       const data = await resp.json();
-      return data.result ? JSON.parse(data.result) : null;
+      if (!data.result) return null;
+      // Parse the stored JSON string back to the original value.
+      // Handle legacy double-stringified data gracefully: if the first parse
+      // returns a string (not array/object), try parsing again.
+      let parsed = JSON.parse(data.result);
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed); } catch { /* keep as string */ }
+      }
+      return parsed;
     },
     async set(key, value) {
+      // Upstash REST SET: POST {url}/set/{key} with the value as body.
+      // We JSON.stringify the value ONCE so it's stored as a JSON string.
+      // On GET, data.result is this string, and JSON.parse gives back the original.
+      const serialized = JSON.stringify(value);
       const resp = await fetch(`${url}/set/${encodeURIComponent(key)}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
+          'Content-Type': 'text/plain',
         },
-        body: JSON.stringify(JSON.stringify(value)),
+        body: serialized,
       });
       if (!resp.ok) throw new Error(`Upstash SET failed: ${resp.status}`);
       return true;
