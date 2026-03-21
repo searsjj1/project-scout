@@ -5352,6 +5352,28 @@ export default function ProjectScout() {
     return sharedStoreUrl.current;
   }, []);
 
+  // Low-level shared store write (immediate, no guard, no debounce)
+  // Used only by initial sync to bypass the sharedSyncReady guard.
+  const writeToSharedStoreNow = useCallback(async (key, data) => {
+    const url = getStoreUrl();
+    if (!url) return;
+    try {
+      const resp = await fetch(`${url}?action=set`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: `ps_${key}`, value: data }),
+      });
+      if (resp.ok) {
+        const result = await resp.json();
+        if (result.ok) {
+          console.log(`[Shared Store] ✓ Wrote ps_${key} (${result.count} items)`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[Shared Store] Write failed for ps_${key}:`, err.message);
+    }
+  }, [getStoreUrl]);
+
   // Save to shared store (debounced, fire-and-forget)
   // IMPORTANT: Writes are suppressed until initial sync completes (sharedSyncReady).
   // Without this guard, mount-time save effects fire with stale/empty initial state
@@ -5467,7 +5489,7 @@ export default function ProjectScout() {
 
           if (sharedLen === 0 && localLen > 0) {
             // Shared empty, local has data → bootstrap shared from local
-            saveToSharedStore(key, localValue);
+            await writeToSharedStoreNow(key, localValue);
             bootstrapped++;
             console.log(`[Shared Store] Bootstrap: pushed ${localLen} local ${key} items to shared store`);
           } else if (sharedLen > 0 && localLen === 0) {
@@ -5494,7 +5516,7 @@ export default function ProjectScout() {
               console.log(`[Shared Store] In sync: ${key} — local (${localLen}) and shared (${sharedLen}) have same IDs`);
             }
             // Push merged result back to shared
-            saveToSharedStore(key, added > 0 ? mergedValue : localValue);
+            await writeToSharedStoreNow(key, added > 0 ? mergedValue : localValue);
             merged++;
           }
           // Both empty → nothing to do
@@ -5503,7 +5525,7 @@ export default function ProjectScout() {
         // When a lead is moved between lists (e.g., leads → notpursued) in another session,
         // this session's stale local state may still have the lead in the old list.
         // Remove IDs that appear in a "destination" list from their "source" lists.
-        const reconcileLists = () => {
+        const reconcileLists = async () => {
           const currentLeads = loadState('leads', []);
           const currentNP = loadState('notpursued', []);
           const currentSubmitted = loadState('submitted', []);
@@ -5519,10 +5541,10 @@ export default function ProjectScout() {
             console.log(`[Shared Store] Cross-list reconciliation: removed ${removed} lead(s) from Active/Watch that exist in Not Pursued or Submitted`);
             saveState('leads', cleanedLeads);
             setLeads(cleanedLeads);
-            saveToSharedStore('leads', cleanedLeads);
+            await writeToSharedStoreNow('leads', cleanedLeads);
           }
         };
-        reconcileLists();
+        await reconcileLists();
 
         console.log(`[Shared Store] Initial sync complete — bootstrapped: ${bootstrapped}, restored: ${restored}, merged: ${merged}`);
         sharedSyncReady.current = true;
