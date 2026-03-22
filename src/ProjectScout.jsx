@@ -545,8 +545,34 @@ const INIT_TARGET_ORGS = [
 
 function formatDate(iso) {
   if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return '—'; }
+}
+
+// Safe timeline display — handles dates, years, fiscal years, quarter labels, and Invalid Date
+function formatTimeline(lead) {
+  // Prefer potentialTimeline if it's a clean label (Q2 2026, FY2026, Spring 2026, etc.)
+  if (lead.potentialTimeline) {
+    const tl = lead.potentialTimeline.trim();
+    // If it looks like a readable label already, use it directly
+    if (/^(Q[1-4]|FY|Spring|Summer|Fall|Winter|Early|Late|Mid|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i.test(tl)) return tl;
+    if (/^\d{4}$/.test(tl)) return tl; // Just a year
+    if (/^\d{4}\s*[-–]\s*\d{2,4}$/.test(tl)) return tl; // FY range like 2026-2027
+    // If it looks like a parseable date, format it
+    try {
+      const d = new Date(tl);
+      if (!isNaN(d.getTime()) && d.getFullYear() >= 2020) return formatDate(tl);
+    } catch {}
+    // Otherwise return as-is (short enough to display)
+    if (tl.length <= 40) return tl;
+    return tl.slice(0, 37) + '...';
+  }
+  // Fall back to action_due_date
+  if (lead.action_due_date) return formatDate(lead.action_due_date);
+  return '—';
 }
 
 function daysAgo(iso) {
@@ -769,7 +795,7 @@ function LeadCard({ lead, onClick, style: animStyle }) {
           }} />
         )}
         {lead.lastValidated && !lead.validationClaimed && (
-          <span title={`Last validated ${new Date(lead.lastValidated).toLocaleDateString()}`} style={{
+          <span title={`Last validated ${formatDate(lead.lastValidated)}`} style={{
             display: 'inline-block', width: 5, height: 5, borderRadius: '50%',
             background: '#d1d5db', flexShrink: 0,
           }} />
@@ -794,9 +820,9 @@ function LeadCard({ lead, onClick, style: animStyle }) {
           <ScoreRing score={lead.relevanceScore || 0} label="Relevance" />
           {lead.action_due_date ? (
             <UrgencyRing dueDate={lead.action_due_date} />
-          ) : lead.potentialTimeline ? (
+          ) : (lead.potentialTimeline || lead.action_due_date) ? (
             <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
-              <span style={{ fontSize:11, fontWeight:600, color:'#64748b' }}>{lead.potentialTimeline}</span>
+              <span style={{ fontSize:11, fontWeight:600, color:'#64748b' }}>{formatTimeline(lead)}</span>
               <span style={{ fontSize:9, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em' }}>Timeline</span>
             </div>
           ) : null}
@@ -834,6 +860,11 @@ function generateWatchSummary(lead) {
   }
   if (cat === 'annexation_area') {
     return `This is an annexation or land use area${locPhrase} where new development is anticipated. Annexation typically leads to infrastructure planning, new public facilities, and commercial or residential construction — all of which may need architectural and engineering services.`;
+  }
+  if (cat === 'capital_budget') {
+    const budgetNote = lead.potentialBudget ? ` Budget: ${lead.potentialBudget}.` : '';
+    const timeNote = lead.potentialTimeline ? ` Expected: ${lead.potentialTimeline}.` : '';
+    return `This is a capital budget or CIP item${ownerPhrase}${locPhrase}.${budgetNote}${timeNote} Capital-budgeted projects are strong early signals — they indicate committed funding for facility work that will likely require A/E services as the project advances through design and procurement.`;
   }
   if (cat === 'named_project') {
     const statusNote = lead.projectStatus === 'pre_solicitation'
@@ -1355,7 +1386,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
               <DetailField icon={<Building2 size={13} />} label="Owner" value={editing ? <input style={fieldInput} value={form.owner} onChange={e => set('owner', e.target.value)} /> : (lead.owner || '—')} />
               <DetailField icon={<MapPin size={13} />} label="Location" value={editing ? <input style={fieldInput} value={form.location} onChange={e => set('location', e.target.value)} /> : (lead.location || '—')} />
               <DetailField icon={<DollarSign size={13} />} label="Budget" value={editing ? <input style={fieldInput} value={form.potentialBudget} onChange={e => set('potentialBudget', e.target.value)} /> : (lead.potentialBudget || '—')} />
-              <DetailField icon={<Calendar size={13} />} label="Timeline" value={editing ? <input style={fieldInput} value={form.potentialTimeline} onChange={e => set('potentialTimeline', e.target.value)} /> : (lead.potentialTimeline || lead.action_due_date ? new Date(lead.action_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')} />
+              <DetailField icon={<Calendar size={13} />} label="Timeline" value={editing ? <input style={fieldInput} value={form.potentialTimeline} onChange={e => set('potentialTimeline', e.target.value)} /> : (formatTimeline(lead))} />
               <DetailField icon={<Globe size={13} />} label="Source" value={lead.sourceName || '—'} />
               <DetailField icon={<Clock size={13} />} label="Discovered" value={formatDate(lead.dateDiscovered)} />
             </div>
@@ -1378,7 +1409,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                   </span>
                   {lead.lastValidated && (
                     <span style={{ fontSize: 9.5, color: '#94a3b8', marginLeft: 'auto' }}>
-                      {new Date(lead.lastValidated).toLocaleDateString()}
+                      {formatDate(lead.lastValidated)}
                     </span>
                   )}
                 </div>
@@ -1435,8 +1466,8 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                       {lead.dismissCategory && !lead.dismissReason && ` — ${lead.dismissCategory.replace(/_/g, ' ')}`}
                     </span>
                     <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 'auto' }}>
-                      {disp === WATCH_DISPOSITION.MUTED && lead.mutedAt ? new Date(lead.mutedAt).toLocaleDateString() : ''}
-                      {disp === WATCH_DISPOSITION.DISMISSED && lead.dismissedAt ? new Date(lead.dismissedAt).toLocaleDateString() : ''}
+                      {disp === WATCH_DISPOSITION.MUTED && lead.mutedAt ? formatDate(lead.mutedAt) : ''}
+                      {disp === WATCH_DISPOSITION.DISMISSED && lead.dismissedAt ? formatDate(lead.dismissedAt) : ''}
                     </span>
                   </div>
                 )}
@@ -1508,7 +1539,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                     <Clock size={16} style={{ color: '#dc2626', flexShrink: 0 }} />
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 800, color: '#dc2626' }}>
-                        Due: {new Date(lead.action_due_date).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+                        Due: {formatDate(lead.action_due_date)}
                       </div>
                       {(() => {
                         const days = Math.ceil((new Date(lead.action_due_date) - new Date()) / 86400000);
@@ -1549,7 +1580,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
             {/* ── Supplementary detail fields (Market, Action Due, Last Checked) ── */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, fontSize: 11 }}>
               <DetailField icon={<Building2 size={12} />} label="Market" value={lead.marketSector} />
-              <DetailField icon={<Clock size={12} />} label={lead.status === 'active' || lead.leadClass === 'active_solicitation' ? 'Solicitation Due' : 'Action Due'} value={editing ? <input type="date" style={fieldInput} value={form.action_due_date || ''} onChange={e => set('action_due_date', e.target.value)} /> : (lead.action_due_date ? new Date(lead.action_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—')} />
+              <DetailField icon={<Clock size={12} />} label={lead.status === 'active' || lead.leadClass === 'active_solicitation' ? 'Solicitation Due' : 'Action Due'} value={editing ? <input type="date" style={fieldInput} value={form.action_due_date || ''} onChange={e => set('action_due_date', e.target.value)} /> : (lead.action_due_date ? formatDate(lead.action_due_date) : '—')} />
               <DetailField icon={<RefreshCw size={12} />} label="Last Checked" value={formatDate(lead.lastCheckedDate)} />
             </div>
             {editing && (
@@ -1734,7 +1765,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
                     <span style={{ color: '#94a3b8' }}>Last checked:</span>
-                    <span style={{ fontWeight: 600, color: '#475569' }}>{new Date(lead.lastValidated).toLocaleDateString()}</span>
+                    <span style={{ fontWeight: 600, color: '#475569' }}>{formatDate(lead.lastValidated)}</span>
                     {lead.validationClaimed ? (
                       <span style={{ fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 4, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
                         {lead.validationClaimed.replace(/_/g, ' ')}
@@ -5136,11 +5167,23 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
       kept.push(lead);
       continue;
     }
+    // Leads that the user explicitly chose "Keep" in pruning review are protected
+    // from the same prune reason that triggered the review.
+    // They can still be re-flagged for a DIFFERENT reason.
+    if (lead.pruneReviewKept) {
+      kept.push(lead);
+      continue;
+    }
 
     // Determine effective status and thresholds
     const isWatch = lead.status === 'watch' || lead.status === 'new' || lead.status === 'monitoring';
     const minRelevance = isWatch ? MIN_RELEVANCE_WATCH : MIN_RELEVANCE_ACTIVE;
     const futureProtected = isWatch && hasFutureSignal(lead);
+    // Strategic watch items (named opportunity areas, redevelopment targets, district initiatives) are protected from auto-prune
+    // This is a reusable pattern — applies to any city/county, not just Missoula
+    const isStrategicWatch = lead.leadClass === 'strategic_watch' ||
+      lead.watchCategory === 'tif_district' || lead.watchCategory === 'redevelopment_area' ||
+      lead.watchCategory === 'development_program' || lead.watchCategory === 'capital_budget';
 
     // 1. Portal/listing fragment title
     if (isPortalTitle(lead.title)) reason = 'portal_fragment_title';
@@ -5285,7 +5328,15 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
         'civil_commodity_no_building',
       ]);
 
-      if (isWatch && !WATCH_STRONG_AUTO_REMOVE.has(reason)) {
+      if (isStrategicWatch && !reason.startsWith('already_claimed_')) {
+        // Strategic watch items go directly to review — never auto-pruned except for claimed evidence
+        reviewQueue.push({
+          lead,
+          reason: `Strategic watch candidate: ${reason}`,
+          explanation: `This is a strategic watch item (${lead.watchCategory || lead.leadClass || 'named area'}). It was flagged for "${reason}" but strategic watch items are protected. Review to decide.`,
+        });
+        console.log(`[Board Prune] 📍 "${lead.title}" — ${reason} → protected strategic watch (review only)`);
+      } else if (isWatch && !WATCH_STRONG_AUTO_REMOVE.has(reason)) {
         // Demote to Tier 2 review instead of auto-removing
         const isTaxDriven = reason.startsWith('taxonomy_');
         const taxLabel = isTaxDriven ? reason.split(':').slice(1).join(':') : null;
@@ -5330,7 +5381,7 @@ export default function ProjectScout() {
   // Syncs lead-state records to a shared server-side store (Upstash Redis via Vercel)
   // so they are not trapped in one browser's localStorage.
   // Falls back gracefully to local-only if the shared store is unavailable.
-  const SHARED_KEYS = new Set(['leads', 'submitted', 'notpursued', 'pruning_review_queue']);
+  const SHARED_KEYS = new Set(['leads', 'submitted', 'notpursued', 'pruning_review_queue', 'prune_memory']);
   const [sharedStoreStatus, setSharedStoreStatus] = useState('checking'); // 'checking' | 'connected' | 'local-only' | 'error'
   const sharedSyncTimers = useRef({});
   const sharedStoreUrl = useRef(null);
@@ -5499,6 +5550,7 @@ export default function ProjectScout() {
             else if (key === 'submitted') setSubmittedLeads(sharedValue);
             else if (key === 'notpursued') setNotPursuedLeads(sharedValue);
             else if (key === 'pruning_review_queue') setPruningReviewQueue(sharedValue);
+            else if (key === 'prune_memory') setPruneMemory(sharedValue);
             restored++;
             console.log(`[Shared Store] Restored: loaded ${sharedLen} ${key} items from shared store (local was empty)`);
           } else if (sharedLen > 0 && localLen > 0) {
@@ -5511,6 +5563,7 @@ export default function ProjectScout() {
               else if (key === 'submitted') setSubmittedLeads(mergedValue);
               else if (key === 'notpursued') setNotPursuedLeads(mergedValue);
               else if (key === 'pruning_review_queue') setPruningReviewQueue(mergedValue);
+              else if (key === 'prune_memory') setPruneMemory(mergedValue);
               console.log(`[Shared Store] Merged: ${key} — added ${added} items from shared (local had ${localLen}, shared had ${sharedLen}, merged: ${mergedValue.length})`);
             } else {
               console.log(`[Shared Store] In sync: ${key} — local (${localLen}) and shared (${sharedLen}) have same IDs`);
@@ -5572,6 +5625,100 @@ export default function ProjectScout() {
   const [pruningReviewQueue, setPruningReviewQueue] = useState(() => loadState('pruning_review_queue', []));
   const [pruneReviewVisible, setPruneReviewVisible] = useState(false);
 
+  // ─── Prune learning memory (persisted) ──────────────────
+  // Stores past prune decisions as training signals for future confidence adjustment.
+  // Each record captures: action, pattern features, timestamp.
+  // Memory is capped at 200 most recent decisions to keep storage bounded.
+  const PRUNE_MEMORY_MAX = 200;
+  const [pruneMemory, setPruneMemory] = useState(() => loadState('prune_memory', []));
+  useEffect(() => { saveState('prune_memory', pruneMemory); saveToSharedStore('prune_memory', pruneMemory); }, [pruneMemory]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Extract pattern features from a lead for similarity matching
+  const extractPrunePattern = useCallback((lead, pruneReason) => {
+    const lo = (lead.title || '').toLowerCase();
+    // Extract key tokens (significant words, no stop words)
+    const STOP = new Set(['the','and','for','from','with','this','that','are','was','will','has','have','been','its','our','new','all','project','county','city','state','montana','of','in','at','on','to','by','a','an']);
+    const tokens = lo.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w));
+    return {
+      pruneReason: pruneReason || 'unknown',
+      sourceFamily: lead.sourceId?.replace(/-\d+$/, '') || lead.sourceName?.slice(0, 30) || '',
+      market: lead.marketSector || 'Other',
+      owner: (lead.owner || '').toLowerCase().slice(0, 50),
+      watchCategory: lead.watchCategory || '',
+      titleTokens: tokens.slice(0, 8),
+      relevanceScore: lead.relevanceScore || 0,
+      leadOrigin: lead.leadOrigin || 'live',
+    };
+  }, []);
+
+  // Record a prune decision into memory
+  const recordPruneDecision = useCallback((action, lead, pruneReason) => {
+    const record = {
+      id: `pd-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,
+      action, // 'prune' | 'keep' | 'immune' | 'pause' | 'activate' | 'manual_prune'
+      pattern: extractPrunePattern(lead, pruneReason),
+      timestamp: new Date().toISOString(),
+    };
+    setPruneMemory(prev => {
+      const updated = [record, ...prev].slice(0, PRUNE_MEMORY_MAX);
+      return updated;
+    });
+  }, [extractPrunePattern]);
+
+  // Query prune memory for similar past decisions
+  // Returns { prunedCount, keptCount, immuneCount, totalSimilar, learnedConfidence, explanation }
+  const queryPruneMemory = useCallback((lead, pruneReason) => {
+    if (pruneMemory.length === 0) return { prunedCount: 0, keptCount: 0, immuneCount: 0, totalSimilar: 0, learnedConfidence: null, explanation: null };
+
+    const pattern = extractPrunePattern(lead, pruneReason);
+    let prunedCount = 0, keptCount = 0, immuneCount = 0;
+
+    for (const record of pruneMemory) {
+      const rp = record.pattern;
+      // Similarity check: must match on at least 2 of: pruneReason, market, sourceFamily, or 2+ shared tokens
+      let similarityScore = 0;
+      if (rp.pruneReason === pattern.pruneReason) similarityScore += 2;
+      if (rp.market === pattern.market && pattern.market !== 'Other') similarityScore += 1;
+      if (rp.sourceFamily && rp.sourceFamily === pattern.sourceFamily) similarityScore += 1;
+      if (rp.watchCategory && rp.watchCategory === pattern.watchCategory) similarityScore += 1;
+      // Token overlap
+      const sharedTokens = pattern.titleTokens.filter(t => rp.titleTokens?.includes(t)).length;
+      if (sharedTokens >= 2) similarityScore += 1;
+      if (sharedTokens >= 3) similarityScore += 1;
+
+      if (similarityScore >= 2) {
+        if (record.action === 'prune' || record.action === 'manual_prune') prunedCount++;
+        else if (record.action === 'keep' || record.action === 'activate') keptCount++;
+        else if (record.action === 'immune') immuneCount++;
+      }
+    }
+
+    const totalSimilar = prunedCount + keptCount + immuneCount;
+    if (totalSimilar === 0) return { prunedCount, keptCount, immuneCount, totalSimilar, learnedConfidence: null, explanation: null };
+
+    // Calculate learned confidence adjustment
+    // More prunes → higher confidence to prune again
+    // More keeps/immunes → lower confidence (discourage pruning)
+    const pruneRatio = prunedCount / totalSimilar;
+    let learnedConfidence, explanation;
+
+    if (immuneCount > 0 && immuneCount >= prunedCount) {
+      learnedConfidence = 'suppress';
+      explanation = `${immuneCount} similar item(s) were previously marked Immune — this category is likely worth keeping.`;
+    } else if (keptCount > prunedCount && totalSimilar >= 2) {
+      learnedConfidence = 'lower';
+      explanation = `${keptCount} of ${totalSimilar} similar items were kept vs. ${prunedCount} pruned — this category leans toward Keep.`;
+    } else if (prunedCount > keptCount + immuneCount && totalSimilar >= 3) {
+      learnedConfidence = 'higher';
+      explanation = `${prunedCount} of ${totalSimilar} similar items were previously pruned — this category is likely noise.`;
+    } else {
+      learnedConfidence = 'mixed';
+      explanation = `Mixed history: ${prunedCount} pruned, ${keptCount} kept, ${immuneCount} immune out of ${totalSimilar} similar items.`;
+    }
+
+    return { prunedCount, keptCount, immuneCount, totalSimilar, learnedConfidence, explanation };
+  }, [pruneMemory, extractPrunePattern]);
+
   // Persist on every change (local + shared)
   useEffect(() => { saveState('leads', leads); saveToSharedStore('leads', leads); }, [leads]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { saveState('submitted', submittedLeads); saveToSharedStore('submitted', submittedLeads); }, [submittedLeads]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -5587,7 +5734,7 @@ export default function ProjectScout() {
   useEffect(() => {
     if (boardCleanupDone) return;
     const cleanupVersion = localStorage.getItem('ps_board_cleanup_version');
-    const CURRENT_CLEANUP_VERSION = '2026-03-20-v31d'; // v31d: Frontend taxonomy authority parity — boardQualityPrune is taxonomy-aware
+    const CURRENT_CLEANUP_VERSION = '2026-03-22-v32'; // v32: Re-evaluate existing leads with current quality gates + prune review queue fix
     if (cleanupVersion === CURRENT_CLEANUP_VERSION) { setBoardCleanupDone(true); return; }
 
     // Apply quality gates to all existing leads
@@ -5667,11 +5814,20 @@ export default function ProjectScout() {
       console.log(`[Board Cleanup] All ${currentLeads.length} leads pass current quality gates`);
     }
 
-    // Queue Tier 2 items for pruning review
+    // Queue Tier 2 items for pruning review — enrich with learning signals
     if (reviewQueue.length > 0) {
       setPruningReviewQueue(prev => {
         const existingIds = new Set(prev.map(r => r.lead.id));
-        const newItems = reviewQueue.filter(r => !existingIds.has(r.lead.id));
+        const newItems = reviewQueue
+          .filter(r => !existingIds.has(r.lead.id))
+          .map(r => {
+            // Enrich with learned confidence from past decisions
+            const learned = queryPruneMemory(r.lead, r.reason);
+            return {
+              ...r,
+              learned: learned.totalSimilar > 0 ? learned : null,
+            };
+          });
         return [...prev, ...newItems];
       });
       setPruneReviewVisible(true);
@@ -5889,12 +6045,14 @@ export default function ProjectScout() {
           prunedBy: isWatch ? 'manual' : undefined,
           dateNotPursued: new Date().toISOString(),
         }, ...np]);
+        // Record manual prune as learning signal
+        if (isWatch) recordPruneDecision('manual_prune', lead, reason);
       }
       return prev.filter(l => l.id !== leadId);
     });
     setSelectedLead(null);
     setShowNotPursuedDialog(null);
-  }, []);
+  }, [recordPruneDecision]);
 
   const restoreFromNotPursued = useCallback((leadId, restoreToWatch = false) => {
     setNotPursuedLeads(prev => {
@@ -5920,13 +6078,15 @@ export default function ProjectScout() {
   const handlePruneReviewImmune = useCallback((item) => {
     setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
     setLeads(prev => [{ ...item.lead, pruneImmune: true }, ...prev]);
-  }, []);
+    recordPruneDecision('immune', item.lead, item.reason);
+  }, [recordPruneDecision]);
 
   const handlePruneReviewPause = useCallback((item) => {
     const pauseUntil = new Date(Date.now() + 90 * 86400000).toISOString();
     setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
     setLeads(prev => [{ ...item.lead, pruneReviewPausedUntil: pauseUntil }, ...prev]);
-  }, []);
+    recordPruneDecision('pause', item.lead, item.reason);
+  }, [recordPruneDecision]);
 
   const handlePruneReviewPrune = useCallback((item) => {
     setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
@@ -5938,11 +6098,37 @@ export default function ProjectScout() {
       prunedBy: 'system_reviewed',
       dateNotPursued: new Date().toISOString(),
     }, ...prev]);
-  }, []);
+    recordPruneDecision('prune', item.lead, item.reason);
+  }, [recordPruneDecision]);
 
   const handlePruneReviewActivate = useCallback((item) => {
     setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
     setLeads(prev => [{ ...item.lead, status: LEAD_STATUS.ACTIVE }, ...prev]);
+    recordPruneDecision('activate', item.lead, item.reason);
+  }, [recordPruneDecision]);
+
+  // Keep: remove from review queue, put back on board with a "pruneReviewKept" flag
+  // so the same reason won't re-flag it on the next cleanup cycle.
+  const handlePruneReviewKeep = useCallback((item) => {
+    setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
+    setLeads(prev => [{
+      ...item.lead,
+      pruneReviewKept: true,
+      pruneReviewKeptAt: new Date().toISOString(),
+      pruneReviewKeptReason: item.reason,
+    }, ...prev]);
+    recordPruneDecision('keep', item.lead, item.reason);
+  }, [recordPruneDecision]);
+
+  // Open Details: close the review modal and open the lead detail panel
+  const handlePruneOpenDetails = useCallback((lead) => {
+    // Put the lead back on the board temporarily so the detail panel can show it
+    setLeads(prev => {
+      if (prev.some(l => l.id === lead.id)) return prev;
+      return [{ ...lead }, ...prev];
+    });
+    setSelectedLead(lead);
+    setPruneReviewVisible(false);
   }, []);
 
   const moveToSubmitted = useCallback((leadId, asanaUrl, notes) => {
@@ -6779,12 +6965,29 @@ export default function ProjectScout() {
         // This was the root cause of the Step 11 regression: prune only ran on
         // existing leads, so each backfill's new noise sailed straight onto the board.
         if (genuinelyNew.length > 0) {
-          const { kept: qualityNew, pruned: prunedNew } = boardQualityPrune(genuinelyNew, mergeTaxonomy);
+          const { kept: qualityNew, pruned: prunedNew, reviewQueue: newReviewQueue } = boardQualityPrune(genuinelyNew, mergeTaxonomy);
           if (prunedNew.length > 0) {
             console.log(`[Board Prune] Blocked ${prunedNew.length} noisy incoming leads:`);
             for (const p of prunedNew) {
               console.log(`  ✂ "${p.title}" — ${p.reason}`);
             }
+          }
+          // ── v32: Wire up review queue items from new leads ──
+          // Previously these were computed but silently discarded.
+          if (newReviewQueue.length > 0) {
+            console.log(`[Board Prune] ${newReviewQueue.length} incoming lead(s) routed to prune review:`);
+            for (const r of newReviewQueue) {
+              console.log(`  ⚠ "${r.lead.title}" — ${r.reason}`);
+            }
+            setPruningReviewQueue(prev => {
+              const existingIds = new Set(prev.map(r => r.lead?.id).filter(Boolean));
+              const fresh = newReviewQueue.filter(r => r.lead?.id && !existingIds.has(r.lead.id));
+              if (fresh.length > 0) {
+                setPruneReviewVisible(true);
+                return [...prev, ...fresh];
+              }
+              return prev;
+            });
           }
           board = [...qualityNew, ...board];
         }
@@ -7054,6 +7257,32 @@ export default function ProjectScout() {
             {activeTab === 'taxonomy' && 'Editable classification registry — service fit, pursuit signals, markets, noise suppression'}
             {activeTab === 'settings' && 'Intelligence engine, AI provider, scheduling, Asana integration'}
           </p>
+          {/* ─── PRUNE REVIEW BANNER ─── */}
+          {activeTab === 'active' && pruningReviewQueue.length > 0 && (
+            <div onClick={() => setPruneReviewVisible(true)} style={{
+              marginTop: 12, padding: '10px 16px', borderRadius: 10,
+              background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+              border: '1px solid #fde68a', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 10,
+              transition: 'box-shadow 0.15s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(245,158,11,0.2)'}
+              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+            >
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#fff' }}>{pruningReviewQueue.length}</span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>
+                  {pruningReviewQueue.length === 1 ? '1 lead needs pruning review' : `${pruningReviewQueue.length} leads need pruning review`}
+                </div>
+                <div style={{ fontSize: 11, color: '#b45309', marginTop: 1 }}>
+                  Scout flagged borderline items — click to review before they are removed
+                </div>
+              </div>
+              <ArrowUpRight size={16} style={{ color: '#d97706', flexShrink: 0 }} />
+            </div>
+          )}
         </div>
 
         {activeTab === 'active' && <ActiveLeadsTab leads={leads} onSelectLead={handleSelectLead} onUpdateLead={updateLead} />}
@@ -7141,6 +7370,8 @@ export default function ProjectScout() {
           onPause={handlePruneReviewPause}
           onPrune={handlePruneReviewPrune}
           onActivate={handlePruneReviewActivate}
+          onKeep={handlePruneReviewKeep}
+          onOpenDetails={handlePruneOpenDetails}
           onClose={() => setPruneReviewVisible(false)}
         />
       )}
@@ -7193,7 +7424,7 @@ export default function ProjectScout() {
 // ── Pruning Review Modal ──────────────────────────────────────
 // Shows Tier 2 borderline items one at a time for user review.
 // Actions: Mark Immune, Pause 90 Days, Prune, Move to Active.
-function PruningReviewModal({ queue, onImmune, onPause, onPrune, onActivate, onClose }) {
+function PruningReviewModal({ queue, onImmune, onPause, onPrune, onActivate, onKeep, onOpenDetails, onClose }) {
   const [currentIdx, setCurrentIdx] = useState(0);
   if (queue.length === 0) return null;
   const item = queue[Math.min(currentIdx, queue.length - 1)];
@@ -7203,61 +7434,93 @@ function PruningReviewModal({ queue, onImmune, onPause, onPrune, onActivate, onC
     if (currentIdx >= queue.length - 1 && queue.length > 1) setCurrentIdx(Math.max(0, currentIdx - 1));
   };
 
+  // Prune confidence: high = taxonomy-driven or already-claimed, medium = noise/generic, low = borderline tier2
+  const confidence = item.reason?.startsWith('taxonomy_') ? 'high'
+    : item.reason?.startsWith('already_claimed') ? 'high'
+    : item.reason?.includes('noise') || item.reason?.includes('generic') || item.reason?.includes('below_relevance') ? 'medium'
+    : 'low';
+  const confLabel = confidence === 'high' ? 'High confidence' : confidence === 'medium' ? 'Moderate confidence' : 'Low confidence';
+  const confColor = confidence === 'high' ? '#dc2626' : confidence === 'medium' ? '#d97706' : '#6b7280';
+  const confBg = confidence === 'high' ? '#fef2f2' : confidence === 'medium' ? '#fffbeb' : '#f8fafc';
+
   return (
     <>
       <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.35)', zIndex:2000 }} />
-      <div style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)', background:'#fff', borderRadius:16, width:'92%', maxWidth:680, maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.18)', zIndex:2001, overflow:'hidden' }}>
+      <div style={{ position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)', background:'#fff', borderRadius:16, width:'92%', maxWidth:720, maxHeight:'88vh', display:'flex', flexDirection:'column', boxShadow:'0 24px 80px rgba(0,0,0,0.18)', zIndex:2001, overflow:'hidden' }}>
         {/* Header */}
         <div style={{ padding:'16px 22px', borderBottom:'1px solid #f1f5f9', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 }}>
           <div>
             <h3 style={{ fontSize:15, fontWeight:800, color:'#0f172a', margin:0 }}>Pruning Review</h3>
             <div style={{ fontSize:11.5, color:'#94a3b8', marginTop:2 }}>
-              {queue.length > 1 ? `Item ${Math.min(currentIdx + 1, queue.length)} of ${queue.length} — decide what to do with borderline leads` : 'Review this borderline lead before removal'}
+              {queue.length > 1 ? `Item ${Math.min(currentIdx + 1, queue.length)} of ${queue.length} — review before Scout removes` : 'Review this lead before removal'}
             </div>
           </div>
           <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', padding:4, color:'#94a3b8' }}><X size={18} /></button>
         </div>
 
-        {/* Reason badge */}
-        <div style={{ padding:'10px 22px', background:'#fffbeb', borderBottom:'1px solid #fef3c7', flexShrink:0 }}>
+        {/* Reason + confidence badge */}
+        <div style={{ padding:'10px 22px', background: confBg, borderBottom:'1px solid #f1f5f9', flexShrink:0, display:'flex', gap:8, alignItems:'flex-start', flexWrap:'wrap' }}>
           <span style={{ fontSize:10.5, fontWeight:700, padding:'2px 8px', borderRadius:4, background:'#fef3c7', color:'#92400e' }}>{item.reason}</span>
-          <p style={{ fontSize:12, color:'#78716c', margin:'6px 0 0', lineHeight:1.5 }}>{item.explanation}</p>
+          <span style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:4, background: confBg, color: confColor, border:`1px solid ${confColor}30` }}>{confLabel}</span>
+          <p style={{ fontSize:12, color:'#78716c', margin:'4px 0 0', lineHeight:1.5, width:'100%' }}>{item.explanation}</p>
+          {item.learned && item.learned.totalSimilar > 0 && (
+            <div style={{ marginTop:6, padding:'6px 10px', borderRadius:6, background: item.learned.learnedConfidence === 'suppress' ? '#ecfdf5' : item.learned.learnedConfidence === 'lower' ? '#eff6ff' : item.learned.learnedConfidence === 'higher' ? '#fef2f2' : '#f8fafc', border:'1px solid #e2e8f0', fontSize:11, lineHeight:1.4 }}>
+              <span style={{ fontWeight:700, color: item.learned.learnedConfidence === 'suppress' ? '#065f46' : item.learned.learnedConfidence === 'lower' ? '#1e40af' : item.learned.learnedConfidence === 'higher' ? '#991b1b' : '#64748b' }}>
+                {item.learned.learnedConfidence === 'suppress' ? '🛡 Usually kept' : item.learned.learnedConfidence === 'lower' ? '📊 Leans toward Keep' : item.learned.learnedConfidence === 'higher' ? '📊 Leans toward Prune' : '📊 Mixed history'}
+              </span>
+              <span style={{ color:'#64748b', marginLeft:6 }}>{item.learned.explanation}</span>
+            </div>
+          )}
         </div>
 
         {/* Lead details */}
-        <div style={{ flex:1, overflowY:'auto', padding:'16px 22px', maxHeight:'40vh' }}>
+        <div style={{ flex:1, overflowY:'auto', padding:'16px 22px', maxHeight:'38vh' }}>
           <h4 style={{ fontSize:14, fontWeight:700, color:'#1e293b', margin:'0 0 8px' }}>{lead.user_edited_title || lead.title || 'Untitled'}</h4>
-          {lead.description && <p style={{ fontSize:12, color:'#64748b', lineHeight:1.6, margin:'0 0 10px' }}>{(lead.description || '').slice(0, 300)}</p>}
+          {lead.description && <p style={{ fontSize:12, color:'#64748b', lineHeight:1.6, margin:'0 0 10px' }}>{(lead.description || '').slice(0, 400)}</p>}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, fontSize:11.5 }}>
             {lead.owner && <div><span style={{ fontWeight:600, color:'#64748b' }}>Owner:</span> {lead.owner}</div>}
             {lead.location && <div><span style={{ fontWeight:600, color:'#64748b' }}>Location:</span> {lead.location}</div>}
             {lead.marketSector && <div><span style={{ fontWeight:600, color:'#64748b' }}>Sector:</span> {lead.marketSector}</div>}
             {lead.relevanceScore > 0 && <div><span style={{ fontWeight:600, color:'#64748b' }}>Score:</span> {lead.relevanceScore}</div>}
             {lead.sourceName && <div><span style={{ fontWeight:600, color:'#64748b' }}>Source:</span> {lead.sourceName}</div>}
-            {lead.leadOrigin && <div><span style={{ fontWeight:600, color:'#64748b' }}>Origin:</span> {lead.leadOrigin}</div>}
+            {lead.potentialBudget && <div><span style={{ fontWeight:600, color:'#64748b' }}>Budget:</span> {lead.potentialBudget}</div>}
+            {lead.action_due_date && <div><span style={{ fontWeight:600, color:'#64748b' }}>Due:</span> {lead.action_due_date}</div>}
+            {lead.potentialTimeline && <div><span style={{ fontWeight:600, color:'#64748b' }}>Timeline:</span> {lead.potentialTimeline}</div>}
           </div>
           {lead.sourceUrl && <div style={{ marginTop:8 }}><a href={lead.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color:'#3b82f6', fontSize:11 }}>Source link ↗</a></div>}
         </div>
 
-        {/* Action buttons */}
-        <div style={{ padding:'14px 22px', borderTop:'1px solid #f1f5f9', display:'flex', gap:8, flexWrap:'wrap', flexShrink:0, justifyContent:'center' }}>
-          <button onClick={() => { onImmune(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'none', background:'#d1fae5', color:'#065f46', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
-            <Shield size={13} /> Mark Immune
-          </button>
-          <button onClick={() => { onPause(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'none', background:'#fef3c7', color:'#92400e', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
-            <Clock size={13} /> Pause 90 Days
-          </button>
-          <button onClick={() => { onPrune(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'none', background:'#fee2e2', color:'#991b1b', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
-            <Archive size={13} /> Prune
-          </button>
-          <button onClick={() => { onActivate(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'none', background:'#0f172a', color:'#fff', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
-            <ArrowUpRight size={13} /> Move to Active
-          </button>
+        {/* Action buttons — 2 rows */}
+        <div style={{ padding:'12px 22px 6px', borderTop:'1px solid #f1f5f9', flexShrink:0 }}>
+          {/* Primary actions */}
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center', marginBottom:8 }}>
+            <button onClick={() => { if (onKeep) onKeep(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'2px solid #10b981', background:'#fff', color:'#065f46', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
+              <CheckCircle2 size={13} /> Keep
+            </button>
+            <button onClick={() => { onImmune(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'none', background:'#d1fae5', color:'#065f46', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
+              <Shield size={13} /> Immune
+            </button>
+            <button onClick={() => { onPause(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'none', background:'#fef3c7', color:'#92400e', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
+              <Clock size={13} /> Pause 90d
+            </button>
+            <button onClick={() => { onPrune(item); advance(); }} style={{ padding:'8px 16px', borderRadius:8, border:'none', background:'#fee2e2', color:'#991b1b', cursor:'pointer', fontSize:11.5, fontWeight:700, display:'flex', alignItems:'center', gap:5 }}>
+              <Archive size={13} /> Prune
+            </button>
+          </div>
+          {/* Secondary actions */}
+          <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
+            <button onClick={() => { if (onOpenDetails) onOpenDetails(item.lead); }} style={{ padding:'6px 14px', borderRadius:7, border:'1px solid #e2e8f0', background:'#fff', color:'#475569', cursor:'pointer', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+              <FileText size={12} /> Open Details
+            </button>
+            <button onClick={() => { onActivate(item); advance(); }} style={{ padding:'6px 14px', borderRadius:7, border:'1px solid #e2e8f0', background:'#fff', color:'#475569', cursor:'pointer', fontSize:11, fontWeight:600, display:'flex', alignItems:'center', gap:4 }}>
+              <ArrowUpRight size={12} /> Move to Active
+            </button>
+          </div>
         </div>
 
         {/* Carousel nav */}
         {queue.length > 1 && (
-          <div style={{ padding:'8px 22px 12px', display:'flex', justifyContent:'center', gap:12, flexShrink:0 }}>
+          <div style={{ padding:'6px 22px 12px', display:'flex', justifyContent:'center', gap:12, flexShrink:0 }}>
             <button onClick={() => setCurrentIdx(Math.max(0, currentIdx - 1))} disabled={currentIdx === 0}
               style={{ background:'none', border:'1px solid #e2e8f0', borderRadius:6, padding:'4px 12px', cursor: currentIdx === 0 ? 'not-allowed' : 'pointer', opacity: currentIdx === 0 ? 0.4 : 1, fontSize:11, color:'#64748b' }}>← Previous</button>
             <button onClick={() => setCurrentIdx(Math.min(queue.length - 1, currentIdx + 1))} disabled={currentIdx >= queue.length - 1}
