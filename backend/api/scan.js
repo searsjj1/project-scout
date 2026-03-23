@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v3.4-20260319';
+const SCAN_BUILD_ID = 'scan-v3.5-20260323';
 
 // ── PDF text extraction (lazy-loaded) ───────────────────────
 // Uses unpdf — a serverless-optimized PDF.js wrapper with zero native dependencies.
@@ -317,9 +317,9 @@ function extractChildLinks(rawHtml, sourceUrl) {
     let linkType = null;
     let relevanceHint = 0;
 
-    // RFQ/RFP/solicitation detail pages
-    if (/\b(rfq|rfp|request for|solicitation|invitation to bid)\b/.test(lo) ||
-        /\b(bid|rfq|rfp|solicitation)\b/.test(hrefLo)) {
+    // RFQ/RFP/BID/SOQ/solicitation detail pages
+    if (/\b(rfq|rfp|soq|bid|request for|solicitation|invitation to bid)\b/.test(lo) ||
+        /\b(bid|rfq|rfp|soq|solicitation)\b/.test(hrefLo)) {
       linkType = 'solicitation_detail';
       relevanceHint = 10;
     }
@@ -573,7 +573,7 @@ function isNavigationJunk(text) {
   // Fail if it doesn't contain at least one real project-related word
   // Also allow Watch-quality development/redevelopment area names with proper nouns
   if (!PROJECT_TITLE_WORDS.test(text)) {
-    const hasWatchAreaWord = /\b(redevelopment|development|revitalization|corridor|triangle|commons|crossing|downtown|midtown|district|quarter|village|landing|heights|terrace|urban renewal|master plan)\b/i.test(text);
+    const hasWatchAreaWord = /\b(redevelopment|development|revitalization|corridor|triangle|commons|crossing|downtown|midtown|district|quarter|village|landing|heights|terrace|urban renewal|master plan|mill|yard|log\s*yard|station|depot|junction|plaza|block|square|project|site|phase|parcel|park)\b/i.test(text);
     const hasProperNoun = /[A-Z][a-z]{2,}/.test(text);
     if (!(hasWatchAreaWord && hasProperNoun)) return true;
   }
@@ -626,6 +626,9 @@ function isProjectSpecificTitle(title) {
 
   // "Org — GenericType" pattern is never project-specific
   if (/^[\w\s&'.,]+\s*[–—-]\s*(solicitation|project signal|capital improvement|bond\/levy program|master plan|renovation project|expansion project)$/i.test(lo)) return false;
+  // v32b: Standalone program/category headings — not a specific project
+  // "Capital Improvement", "Bid Solicitations", "Current Projects", "City Bids"
+  if (/^(capital improvement|bid solicitations?|current (projects?|solicitations?|bids?)|city (bids?|projects?)|municipal (bids?|projects?)|public (works?|bids?|projects?))$/i.test(lo.trim())) return false;
 
   // Must contain at least one named-project indicator:
   //   a) A proper noun (capitalized word not at start, or multiple caps)
@@ -656,8 +659,11 @@ function isProjectSpecificTitle(title) {
   // Named development areas — must be specific area-type names, not generic geographic words.
   // "Midtown Commons", "Riverfront Triangle", "Southgate Crossing" are valid.
   // "Silver Park", "Cedar Point", "Pine Ridge" are just place names, not projects.
-  const hasAreaIndicator = /\b(commons|crossing|triangle|corridor|square|plaza|block|district|quarter|village|landing|heights|terrace|junction)\b/i.test(lo);
-  if (hasProperName && hasAreaIndicator && lo.length >= 15) return true;
+  const hasAreaIndicator = /\b(commons|crossing|triangle|corridor|square|plaza|block|district|quarter|village|landing|heights|terrace|junction|mill|yard|log\s*yard|station|depot|warehouse|annex)\b/i.test(lo);
+  if (hasProperName && hasAreaIndicator && lo.length >= 12) return true;
+  // Named development/redevelopment targets — "Scott Street Project", "Bonner Mill", "Wye 2"
+  const hasDevelopmentTarget = /\b(project|site|development|redevelopment|phase|parcel)\b/i.test(lo);
+  if (hasProperName && hasDevelopmentTarget && lo.length >= 10) return true;
 
   return false;
 }
@@ -674,10 +680,42 @@ function isWatchTitleAcceptable(title) {
   if (!title || title.length < 12) return { pass: false, reason: 'too_short' };
   const lo = title.toLowerCase();
 
+  // ── Block: address-only titles ──
+  // "123 Main Street", "456 N Reserve St", "PO Box 1234"
+  if (/^\d+\s+[A-Z]/i.test(title.trim()) && /\b(st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|ct|court|pl|place|hwy|highway)\b/i.test(lo) &&
+      !/\b(renovation|construction|design|project|replacement|upgrade|addition|expansion|facility|building)\b/i.test(lo))
+    return { pass: false, reason: 'address_only' };
+  if (/^p\.?o\.?\s*box\s+\d/i.test(lo.trim()))
+    return { pass: false, reason: 'address_only' };
+
+  // ── Block: phone/fax/email-only fragments ──
+  if (/^\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/.test(lo.trim()))
+    return { pass: false, reason: 'phone_fragment' };
+  if (/^[\w.+-]+@[\w.-]+\.\w{2,}$/.test(lo.trim()))
+    return { pass: false, reason: 'email_fragment' };
+
+  // ── Block: standalone person names (First Last format) without project context ──
+  // "John Smith", "Mary Johnson" — but allow "Smith Block Building", "Johnson Library"
+  if (/^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$/.test(title.trim()) && title.split(/\s+/).length === 2 &&
+      !/\b(building|library|school|center|hall|facility|station|park|bridge|tower|plaza|court)\b/i.test(lo))
+    return { pass: false, reason: 'person_name_only' };
+
   // ── Block: page/document chrome that leaked into title ──
   // "View the FY25-26_Approved_Budget", "Click to download", file references
-  if (/\b(view the|click (to|here|for)|download|log ?in|sign ?up|subscribe|print(able)?|page \d|see (more|all|details))\b/i.test(lo))
+  if (/\b(view the|click (to|here|for)|download|log ?in|sign ?up|subscribe|print(able)?|page \d|see (more|all|details)|skip to|back to top|read more)\b/i.test(lo))
     return { pass: false, reason: 'document_chrome' };
+
+  // ── Block: URL fragments that leaked into title ──
+  if (/^https?:\/\//i.test(lo.trim()) || /^www\./i.test(lo.trim()))
+    return { pass: false, reason: 'url_fragment' };
+
+  // ── Block: standalone date/time strings ──
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/i.test(lo.trim()) || /^\d{1,2}:\d{2}\s*(am|pm)?\s*$/i.test(lo.trim()))
+    return { pass: false, reason: 'datetime_only' };
+
+  // ── Block: very short generic words that aren't project titles ──
+  if (/^(overview|details|summary|information|more|resources|forms|links|media|photos|gallery|map|maps|search|results|listings|archive|list)\s*$/i.test(lo.trim()))
+    return { pass: false, reason: 'generic_nav_word' };
 
   // File name fragments: "FY25-26_Approved_Budget", "2026_CIP_Report"
   if (/\b\w+_\w+_\w+\b/.test(title) && !/\b(renovation|construction|addition|expansion|replacement|modernization)\b/i.test(lo))
@@ -787,8 +825,10 @@ function isWatchTitleAcceptable(title) {
     return { pass: false, reason: 'generic_assessment' };
 
   // ── Block: park/recreation/trail without building scope ──
+  // Exception: "development park", "industrial park", "business park", "technology park" are redevelopment zones, not recreational parks
   if (/\b(park|recreation|trail|playground|sports? field|ball field|skate park|dog park|splash pad)\b/i.test(lo) &&
-      !/\b(renovation|construction|building|facility|design|addition|expansion|community center|recreation center|pool|aquatic|pavilion|clubhouse|restroom|shelter)\b/i.test(lo))
+      !/\b(renovation|construction|building|facility|design|addition|expansion|community center|recreation center|pool|aquatic|pavilion|clubhouse|restroom|shelter)\b/i.test(lo) &&
+      !/\b(development\s+park|industrial\s+park|business\s+park|technology\s+park|commerce\s+park|research\s+park)\b/i.test(lo))
     return { pass: false, reason: 'park_recreation_no_building' };
 
   // ── Block: design excellence / guidelines / overlay pages ──
@@ -1374,7 +1414,7 @@ function isAlreadyClaimed(title, ...contexts) {
  * rather than a single-project page. Returns true if the content
  * has many distinct solicitation/project items listed.
  */
-function isListingPage(content) {
+function isListingPage(content, childLinks) {
   if (!content || content.length < 200) return false;
   const lo = content.toLowerCase();
 
@@ -1394,6 +1434,25 @@ function isListingPage(content) {
   // Count distinct project-like headings or bullet entries
   const projectBullets = lo.match(/(?:^|\n)\s*(?:\d+[\.\)]\s*|•\s*|–\s*|—\s*)(?:rfq|rfp|bid|project|construction|renovation|replacement|improvement)\b/gim) || [];
   if (projectBullets.length >= 4) return true;
+
+  // v32b: Count solicitation-type CHILD LINKS — if the page has 3+ solicitation/project links,
+  // it's a listing page even if the body text doesn't match the patterns above.
+  // This catches pages like Coeur d'Alene Bid Solicitations where projects are all <a> links.
+  if (childLinks && childLinks.length > 0) {
+    const solLinks = childLinks.filter(cl =>
+      cl.linkType === 'solicitation_detail' || cl.linkType === 'project_detail' ||
+      /\b(rfq|rfp|soq|bid|solicitation)\b/i.test(cl.anchorText)
+    );
+    if (solLinks.length >= 3) return true;
+  }
+
+  // Count multiple distinct RFQ/RFP/BID/SOQ mentions in text (without # numbers)
+  const solMentions = lo.match(/\b(rfq|rfp|soq|bid)\s*[-–—:]\s*[a-z]/gi) || [];
+  if (solMentions.length >= 3) return true;
+
+  // Page title/heading patterns that indicate a listing/portal
+  if (/\b(bid solicitations?|current (bids?|solicitations?|rfps?|rfqs?)|open (bids?|solicitations?))\b/i.test(lo) &&
+      (lo.match(/\b(rfq|rfp|bid|soq|solicitation)\b/gi) || []).length >= 2) return true;
 
   return false;
 }
@@ -1832,27 +1891,78 @@ function assessServiceFit(ctx, market) {
 // ── Better location extraction from content ─────────────────
 function extractLocation(ctx, src) {
   const lo = (ctx || '').toLowerCase();
-  // Try to find a specific city/town mention
-  const mtCities = [
-    'Missoula','Kalispell','Whitefish','Columbia Falls','Hamilton','Polson',
-    'Helena','Great Falls','Billings','Bozeman','Butte','Anaconda',
-    'Libby','Thompson Falls','Superior','Ronan','Pablo','St. Ignatius',
-    'Stevensville','Florence','Lolo','Frenchtown','Seeley Lake','Bigfork',
-    'Lakeside','Somers','Eureka','Troy','Plains','Hot Springs',
+
+  // v32b: Multi-state city lookup — Montana, Idaho, Washington
+  const cityMap = [
+    // Idaho cities
+    { city: "Coeur d'Alene", state: 'ID', county: 'Kootenai' },
+    { city: 'Boise', state: 'ID', county: 'Ada' },
+    { city: 'Idaho Falls', state: 'ID', county: 'Bonneville' },
+    { city: 'Pocatello', state: 'ID', county: 'Bannock' },
+    { city: 'Meridian', state: 'ID', county: 'Ada' },
+    { city: 'Nampa', state: 'ID', county: 'Canyon' },
+    { city: 'Twin Falls', state: 'ID', county: 'Twin Falls' },
+    { city: 'Lewiston', state: 'ID', county: 'Nez Perce' },
+    { city: 'Moscow', state: 'ID', county: 'Latah' },
+    { city: 'Sandpoint', state: 'ID', county: 'Bonner' },
+    { city: 'Post Falls', state: 'ID', county: 'Kootenai' },
+    // Washington cities
+    { city: 'Spokane', state: 'WA', county: 'Spokane' },
+    { city: 'Seattle', state: 'WA', county: 'King' },
+    { city: 'Pullman', state: 'WA', county: 'Whitman' },
+    // Montana cities
+    { city: 'Missoula', state: 'MT' }, { city: 'Kalispell', state: 'MT' },
+    { city: 'Whitefish', state: 'MT' }, { city: 'Columbia Falls', state: 'MT' },
+    { city: 'Hamilton', state: 'MT' }, { city: 'Polson', state: 'MT' },
+    { city: 'Helena', state: 'MT' }, { city: 'Great Falls', state: 'MT' },
+    { city: 'Billings', state: 'MT' }, { city: 'Bozeman', state: 'MT' },
+    { city: 'Butte', state: 'MT' }, { city: 'Anaconda', state: 'MT' },
+    { city: 'Libby', state: 'MT' }, { city: 'Thompson Falls', state: 'MT' },
+    { city: 'Superior', state: 'MT' }, { city: 'Ronan', state: 'MT' },
+    { city: 'Pablo', state: 'MT' }, { city: 'St. Ignatius', state: 'MT' },
+    { city: 'Stevensville', state: 'MT' }, { city: 'Florence', state: 'MT' },
+    { city: 'Lolo', state: 'MT' }, { city: 'Frenchtown', state: 'MT' },
+    { city: 'Seeley Lake', state: 'MT' }, { city: 'Bigfork', state: 'MT' },
+    { city: 'Lakeside', state: 'MT' }, { city: 'Somers', state: 'MT' },
+    { city: 'Eureka', state: 'MT' }, { city: 'Troy', state: 'MT' },
+    { city: 'Plains', state: 'MT' }, { city: 'Hot Springs', state: 'MT' },
   ];
-  for (const city of mtCities) {
-    if (lo.includes(city.toLowerCase())) {
-      // Try to find the county too
-      const countyPat = new RegExp(city + '[^.]{0,30}(\\w+ county)', 'i');
+
+  // Also detect state from URL or source name
+  const srcUrl = (src.url || src.source_url || '').toLowerCase();
+  const srcName = (src.name || src.source_name || '').toLowerCase();
+  const urlState = /\.id\b|idaho/i.test(srcUrl + ' ' + srcName) ? 'ID'
+    : /\.wa\b|washington/i.test(srcUrl + ' ' + srcName) ? 'WA'
+    : null;
+
+  for (const entry of cityMap) {
+    if (lo.includes(entry.city.toLowerCase())) {
+      const st = entry.state;
+      if (entry.county) return `${entry.city}, ${entry.county} County, ${st}`;
+      // Try to find county in context
+      const countyPat = new RegExp(entry.city.replace(/'/g, '.') + '[^.]{0,30}(\\w+ county)', 'i');
       const cm = ctx.match(countyPat);
-      return cm ? `${city}, ${cm[1]}, MT` : `${city}, MT`;
+      return cm ? `${entry.city}, ${cm[1]}, ${st}` : `${entry.city}, ${st}`;
     }
   }
-  // Fall back to county if available
+
+  // Fall back to county + state detection
   const countyPat = /\b(\w+(?:\s+\w+)?\s+county)\b/i;
   const cm = lo.match(countyPat);
-  if (cm) return `${cm[1].replace(/\b\w/g, c => c.toUpperCase())}, MT`;
-  // Fall back to source geography
+  if (cm) {
+    const county = cm[1].replace(/\b\w/g, c => c.toUpperCase());
+    // Check if known Idaho/WA county
+    const idCounties = ['kootenai','ada','canyon','bonneville','bannock','twin falls','nez perce','latah','bonner','boundary','shoshone','benewah'];
+    const waCounties = ['spokane','king','whitman','pierce','clark','snohomish'];
+    const countyLo = county.toLowerCase().replace(' county', '').trim();
+    if (idCounties.includes(countyLo) || urlState === 'ID') return `${county}, ID`;
+    if (waCounties.includes(countyLo) || urlState === 'WA') return `${county}, WA`;
+    return `${county}, MT`;
+  }
+
+  // Fall back to source geography or URL-detected state
+  if (urlState === 'ID') return src.geography ? `${src.geography}, ID` : 'Idaho';
+  if (urlState === 'WA') return src.geography ? `${src.geography}, WA` : 'Washington';
   if (src.geography && src.geography !== 'Statewide') return `${src.geography}, MT`;
   if (src.county) return `${src.county}, MT`;
   return 'Montana';
@@ -1925,41 +2035,43 @@ function generateDescription(matchText, fullContext, leadClass, market, projectT
 // ── Generate meaningful "Why It Matters" ────────────────────
 function generateWhyItMatters(leadClass, market, location, scores, src, serviceFit) {
   const parts = [];
+  const orgName = src.organization || src.name || 'the source';
 
-  // Lead with the most actionable point
+  // Lead with the most actionable point — in business language
   if (leadClass === 'active_solicitation' && serviceFit.fit >= 15) {
-    parts.push('Active solicitation with strong A&E service alignment — likely requires near-term go/no-go decision');
+    parts.push(`${orgName} is actively seeking A&E or design services — review scope and deadline for go/no-go`);
   } else if (leadClass === 'active_solicitation') {
-    parts.push('Active solicitation — review scope to assess firm fit before deadline');
+    parts.push(`${orgName} has an open solicitation — review scope to determine if it aligns with our services`);
+  } else if (leadClass === 'strategic_watch') {
+    parts.push(`This is a strategic development area that may generate future design and construction opportunities`);
   }
 
-  // Service/market fit — be specific about why
-  if (serviceFit.reasons.length > 0 && !parts[0]?.includes('service alignment')) {
-    parts.push(serviceFit.reasons[0].charAt(0).toUpperCase() + serviceFit.reasons[0].slice(1));
+  // Market context — in plain terms
+  if (market && market !== 'Other') {
+    parts.push(`${market} sector — ${['K-12','Higher Education','Healthcare','Civic','Public Safety'].includes(market) ? 'a core market for A&E + SMA' : 'within our service capabilities'}`);
   }
-  if (serviceFit.reasons.length > 1) parts.push(serviceFit.reasons[1]);
 
   // Geography relevance — be specific
-  const coreGeos = ['missoula','kalispell','whitefish','columbia falls','hamilton','polson'];
+  const coreGeos = ['missoula','kalispell','whitefish','columbia falls','hamilton','polson','great falls','helena','bozeman','billings','butte','coeur d\'alene','idaho falls','boise'];
   const locLo = (location || '').toLowerCase();
   if (coreGeos.some(g => locLo.includes(g))) {
     const city = coreGeos.find(g => locLo.includes(g));
-    parts.push(`${city.charAt(0).toUpperCase() + city.slice(1)} is in the firm's core service area`);
-  } else if (/\b(flathead|ravalli|lake|missoula)\b/.test(locLo)) {
-    parts.push('Western Montana — within the firm\'s primary region');
+    parts.push(`Located in ${city.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')} — within our service area`);
   }
 
   // Target org
   if (scores.matchedOrgs.length > 0) {
-    parts.push(`${scores.matchedOrgs.map(o => o.name).join(', ')} is a tracked target organization`);
+    parts.push(`${scores.matchedOrgs.map(o => o.name).join(', ')} is an existing client or tracked target`);
   }
 
-  // For Watch leads, be honest about what to do
-  if (leadClass === 'watch_signal' && parts.length > 0) {
-    parts.push('Monitor for solicitation release or funding approval');
+  // What to do next — honest and practical
+  if (leadClass === 'active_solicitation') {
+    parts.push('Obtain the solicitation documents and assess scope, schedule, and team availability');
+  } else if (leadClass === 'watch_signal' || leadClass === 'strategic_watch') {
+    parts.push('Monitor for solicitation release, funding approval, or new design scope');
   }
 
-  if (parts.length === 0) parts.push('Potential A&E project opportunity identified through source monitoring');
+  if (parts.length === 0) parts.push(`Project opportunity identified from ${orgName} — review for relevance to our services`);
   return parts.join('. ') + '.';
 }
 
@@ -2020,9 +2132,57 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
   // ── Step 0: Listing page detection ────────────────────────
   // If the page contains many distinct solicitations/projects, flag it.
   // On listing pages, we apply stricter admission for each candidate.
-  const listingPage = isListingPage(content);
+  const listingPage = isListingPage(content, childLinks);
   if (listingPage) {
-    log(`    ⚡ Listing page detected — applying stricter specific-project requirement`);
+    log(`    ⚡ Listing page detected — will decompose into child solicitations`);
+  } else {
+    // v3.5: Diagnostic — show why listing detection failed
+    const solChildCount = (childLinks || []).filter(cl =>
+      cl.linkType === 'solicitation_detail' || cl.linkType === 'project_detail' ||
+      /\b(rfq|rfp|soq|bid|solicitation)\b/i.test(cl.anchorText)
+    ).length;
+    if (solChildCount > 0) {
+      log(`    ℹ️ Not a listing page (${solChildCount} sol-type child links, need ≥3). childLinks total: ${(childLinks||[]).length}`);
+    }
+  }
+
+  // ── Step 0a: Container decomposition for listing pages ──────
+  // When a page is a bid/solicitation listing with many child links,
+  // create lead candidates directly from the child solicitation links
+  // instead of (or in addition to) extracting from the parent page text.
+  // This ensures "RFQ for AWTF Facility Plan Update" becomes the lead,
+  // not "City of Coeur d'Alene — Capital Improvement".
+  const containerChildCandidates = [];
+  if (listingPage && childLinks && childLinks.length > 0) {
+    const solicitationLinks = childLinks.filter(cl =>
+      cl.linkType === 'solicitation_detail' || cl.linkType === 'project_detail' ||
+      (cl.linkType === 'document_pdf' && /\b(rfq|rfp|soq|bid|solicitation|engineering|architect|design)\b/i.test(cl.anchorText))
+    );
+    log(`    📋 Container decomposition: ${solicitationLinks.length} child solicitation links found`);
+    for (const cl of solicitationLinks.slice(0, 15)) {
+      // v3.5: Apply cleanTitle to child anchor text before validation.
+      // Raw anchor texts often have trailing periods, leading whitespace, or
+      // HTML-entity artifacts that cause title validation to reject them.
+      const rawAnchor = cl.anchorText.trim();
+      const anchor = cleanTitle(rawAnchor);
+      if (anchor.length < 8 || anchor.length > 200) continue;
+      if (isNavigationJunk(anchor)) continue;
+      // Skip obvious non-A&E items early: fuel bids, chip seal, mowing, etc.
+      const anchorLo = anchor.toLowerCase();
+      if (/\b(fuel (services?|bid)|chip seal|mowing|snow plow|janitorial|custodial|uniform|vehicle purchase|parts list)\b/i.test(anchorLo)) continue;
+      containerChildCandidates.push({
+        matchText: anchor,
+        fullContext: anchor,
+        wideContext: anchor,
+        patternIndex: -1,
+        extractionPath: 'container_child',
+        headingTitle: anchor, // already cleaned by cleanTitle above
+        childLink: cl, // preserve direct link for evidence
+      });
+    }
+    if (containerChildCandidates.length > 0) {
+      log(`    📋 ${containerChildCandidates.length} child solicitation candidates extracted from listing page`);
+    }
   }
 
   // ── Step 0b: Strategy/retrospective document classification ──
@@ -2090,9 +2250,19 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     /\$[\d,.]+\s*(?:million|mil|m|k)?\s+in\s+(?:TIF|tax increment|urban renewal|URD|MRA|redevelopment)\s+(?:funds?|financing|assistance|investment)[^.]{5,100}/gi,
     // District improvement items: "[District Name] improvement" or "[Area Name] infrastructure"
     /(?:[A-Z][\w\s]{3,30})\s+(?:district|URD|corridor|downtown|midtown)\s+(?:improvement|infrastructure|development|project|investment)[^.]{5,80}/gi,
+
+    // ── v32: Agenda / minutes / staff-report strategic-watch patterns ──
+    // "Discussion of [Named Area/Project]" — common in meeting agendas
+    /(?:discussion|update|presentation|report|review|consideration)\s+(?:of|on|regarding)\s+(?:the\s+)?([A-Z][\w\s]{5,60}(?:project|development|crossing|triangle|corridor|commons|block|mill|yard|park|district|plan|site|phase|area))\b/gi,
+    // "Staff report on [Named Area]" or "Staff presented [Named Project]"
+    /(?:staff\s+(?:report|update|presentation|memo|memorandum))\s+(?:on|regarding|for|about)\s+(?:the\s+)?([A-Z][\w\s]{5,80})/gi,
+    // Named opportunity/development/catalyst site references
+    /(?:opportunity\s+(?:site|zone|area)|catalyst\s+site|development\s+(?:site|target|opportunity))\s*(?::|–|—|for)?\s*([A-Z][\w\s]{3,60})/gi,
+    // "[Named Place] development" or "[Named Place] redevelopment" — reusable across cities
+    /([A-Z][\w\s]{3,40})\s+(?:development|redevelopment|revitalization|renewal|improvement|investment|initiative|master plan)\b[^.]{0,60}/gi,
   ];
 
-  const candidates = [];
+  let candidates = [];
   const seen = new Set();
 
   for (const p of pats) {
@@ -2137,9 +2307,9 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
   // This catches pages like MRA Major Projects where projects are listed as headings.
   const headingCategories = ['Redevelopment Agency', 'Economic Development', 'Capital Planning',
     'Project Pages', 'Capital Projects', 'Planning & Zoning', 'City Council',
-    'County Commission', 'School Board'];
+    'County Commission', 'School Board', 'Community Development', 'Development Authority'];
   const isProjectPage = headingCategories.some(c => (src.category||'').includes(c)) ||
-    /major.?project|redevelopment|capital.?project|master.?plan|development.?district/i.test(src.name || '');
+    /major.?project|redevelopment|capital.?project|master.?plan|development.?(district|opportunity|park)|urban.?renewal|economic.?development|community.?development/i.test(src.name || '');
 
   // v31: Also detect budget/CIP source pages for enhanced HTML extraction
   const isBudgetSource = /SF-08|Capital Planning/i.test(src.source_family || src.category || '') ||
@@ -2274,9 +2444,35 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     }
   }
 
-  // ── Step 2c: Sort candidates — HTML-extracted first (cleaner titles) ──
-  const isHtmlExtracted = (ep) => ep && ep.startsWith('html_');
+  // ── Step 2c: Container-child injection + parent suppression ──
+  // When container children exist, they ARE the real leads. Parent-page-derived
+  // candidates (pattern-based or HTML heading-based) are just the listing page itself
+  // and should be suppressed to avoid "City X — Capital Improvement" as a lead.
+  if (containerChildCandidates.length > 0) {
+    const parentCount = candidates.length;
+    // Keep ONLY container children + any pattern-based candidates that match a specific
+    // child solicitation (e.g., pattern picked up "RFQ for X" from page text that also
+    // has a child link for X). Suppress generic parent-page heading candidates.
+    const containerChildTitles = new Set(containerChildCandidates.map(c =>
+      (c.headingTitle || '').toLowerCase().slice(0, 40).replace(/[^a-z0-9]/g, '')
+    ));
+    candidates = candidates.filter(c => {
+      // Keep if this candidate matches a container child (avoid duplicating)
+      const key = (c.headingTitle || c.matchText || '').toLowerCase().slice(0, 40).replace(/[^a-z0-9]/g, '');
+      if (containerChildTitles.has(key)) return false; // will be in containerChildCandidates
+      // Keep if it's a very specific project-named candidate (not a generic heading)
+      if (c.extractionPath === 'pattern' && /\b(rfq|rfp|soq|bid)\s+[-–—:]\s+/i.test(c.matchText || '')) return true;
+      // Suppress generic heading/link candidates from the listing page
+      return false;
+    });
+    candidates.unshift(...containerChildCandidates);
+    log(`    📋 Container decomposition: suppressed ${parentCount - candidates.length + containerChildCandidates.length} parent candidates, promoted ${containerChildCandidates.length} child candidates`);
+  }
+  const isHtmlExtracted = (ep) => ep && (ep.startsWith('html_') || ep === 'container_child');
   candidates.sort((a, b) => {
+    // Container children first, then HTML-extracted, then pattern-based
+    if (a.extractionPath === 'container_child' && b.extractionPath !== 'container_child') return -1;
+    if (b.extractionPath === 'container_child' && a.extractionPath !== 'container_child') return 1;
     const aHtml = isHtmlExtracted(a.extractionPath);
     const bHtml = isHtmlExtracted(b.extractionPath);
     if (aHtml && !bHtml) return -1;
@@ -2291,8 +2487,12 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
   const MAX_CHILD_FETCHES_PER_SOURCE = isBudgetSource ? 4 : 2;
   let childFetchCount = 0;
 
+  // v32: Redevelopment/district sources may contain multiple named subprojects — raise cap
+  const isDistrictSource = /redevelopment|urban renewal|tif|tedd|urd|major.?project|development.?(district|park|opportunity)/i.test(src.name || src.category || '');
+  const maxLeadsPerSource = isDistrictSource ? 12 : (isBudgetSource ? 10 : 8);
+
   for (const cand of candidates) {
-    if (leads.length >= 8) break; // Cap per source
+    if (leads.length >= maxLeadsPerSource) break;
 
     const { matchText, fullContext, wideContext, extractionPath, headingTitle, rowAmount, rowYear } = cand;
 
@@ -2412,9 +2612,17 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     if (docType.isStrategy) {
       const candidateLo = (matchText || '').toLowerCase();
       const hasOwnProcurement = /\b(?:rfq|rfp|invitation\s+to\s+bid|request\s+for\s+(?:qualifications?|proposals?)|solicitation|bid\s+#|submit\s+by|due\s+date|closing\s+date|selection\s+committee|design\s+services\s+(?:for|needed|required|sought))\b/.test(candidateLo);
-      if (!hasOwnProcurement) {
+      // Exception: named local opportunity areas / redevelopment targets in strategy docs
+      // should still surface as strategic Watch items (they are intelligence signals even without active RFQ)
+      const isNamedOpArea = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park)\b/i.test(candidateLo) && /[A-Z][a-z]{2,}/.test(matchText || '');
+      const isNamedRedevelopment = /\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(candidateLo);
+      if (!hasOwnProcurement && !isNamedOpArea && !isNamedRedevelopment) {
         log(`    ⊘ Strategy-doc suppressed (no own procurement signal): "${title}"`);
         continue;
+      }
+      if ((isNamedOpArea || isNamedRedevelopment) && !hasOwnProcurement) {
+        // Allow through — will be marked as strategic watch after classification below
+        log(`    📍 Strategy-doc: named opportunity area "${title}" allowed as strategic watch`);
       }
     }
 
@@ -2428,7 +2636,19 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
 
     // Classify Active vs Watch — uses MATCH TEXT only (not expanded fullContext which
     // can pull in solicitation words from adjacent sentences on the same page)
-    const { leadClass, status, reason: classifyReason } = classifyActiveWatch(matchText);
+    let { leadClass, status, reason: classifyReason } = classifyActiveWatch(matchText);
+
+    // Override classification for named opportunity areas from strategy docs
+    if (docType.isStrategy) {
+      const candidateLo2 = (matchText || '').toLowerCase();
+      const isOpArea2 = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park)\b/i.test(candidateLo2) && /[A-Z][a-z]{2,}/.test(matchText || '');
+      const isRedev2 = /\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(candidateLo2);
+      const hasProc2 = /\b(?:rfq|rfp|solicitation|bid\s+#|due\s+date)\b/.test(candidateLo2);
+      if ((isOpArea2 || isRedev2) && !hasProc2) {
+        status = 'watch';
+        leadClass = 'strategic_watch';
+      }
+    }
     log(`    📋 classify: "${title.slice(0,50)}" → ${status} (${classifyReason}) | match: "${matchText.slice(0,80).replace(/\n/g,' ')}"`);
 
     // Step 13: Watch-specific title quality gate
@@ -2512,16 +2732,22 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     const id = `lead-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
     // ── Child-document enrichment ────────────────────────────
+    // v32b: Container-child candidates already have their direct child link
+    // Use it as the primary evidence and enrichment source.
+    const isContainerChild = extractionPath === 'container_child' && cand.childLink;
+
     // Find all relevant child links for this lead
-    const relevantChildLinks = (childLinks || []).filter(link => {
-      const al = link.anchorText.toLowerCase();
-      const tl = title.toLowerCase();
-      const words = tl.split(/\s+/).filter(w => w.length > 3);
-      return words.some(w => al.includes(w)) || link.relevanceHint >= 9;
-    });
+    const relevantChildLinks = isContainerChild
+      ? [cand.childLink] // Container-child: use the direct link
+      : (childLinks || []).filter(link => {
+          const al = link.anchorText.toLowerCase();
+          const tl = title.toLowerCase();
+          const words = tl.split(/\s+/).filter(w => w.length > 3);
+          return words.some(w => al.includes(w)) || link.relevanceHint >= 9;
+        });
 
     // Select the single best child link for enrichment fetch
-    const bestChildLink = selectBestChildLink(relevantChildLinks.length > 0 ? relevantChildLinks : childLinks, matchText, title);
+    const bestChildLink = isContainerChild ? cand.childLink : selectBestChildLink(relevantChildLinks.length > 0 ? relevantChildLinks : childLinks, matchText, title);
 
     // Fetch child page content if we have a strong link and haven't blown our per-source budget
     let childEnrichment = null;
@@ -2709,15 +2935,22 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     const whyItMatters = generateWhyItMatters(leadClass, finalMarket, finalLocation, scores, src, finalServiceFit);
     const aiReasonForAddition = generateAIAssessment(leadClass, finalMarket, projectType, scores, finalServiceFit, finalLocation, finalBudget);
 
-    // Build confidence notes
+    // Build confidence notes — layman-readable, not internal jargon
     const confParts = [];
-    confParts.push(`Source: ${src.category || 'Unknown'} (${src.priority || 'standard'} priority)`);
-    if (finalServiceFit.fit >= 15) confParts.push('Strong A&E service alignment');
-    else if (finalServiceFit.fit >= 8) confParts.push('Moderate A&E service alignment');
-    else confParts.push('Limited A&E service alignment');
-    if (leadClass === 'active_solicitation') confParts.push('Active solicitation detected');
-    if (actionDue) confParts.push(`Solicitation due: ${actionDue}`);
-    if (finalBudget) confParts.push('Budget information present');
+    // Source context in plain English
+    const orgName = src.organization || src.name || '';
+    if (leadClass === 'active_solicitation') {
+      confParts.push(`${orgName} has an active solicitation${actionDue ? ` due ${actionDue}` : ''}`);
+    } else if (leadClass === 'strategic_watch') {
+      confParts.push(`Strategic development/redevelopment area monitored from ${orgName}`);
+    } else {
+      confParts.push(`Project signal found via ${orgName}`);
+    }
+    // Service fit in plain English
+    if (finalServiceFit.fit >= 15) confParts.push('Likely involves architectural, engineering, or planning services');
+    else if (finalServiceFit.fit >= 8) confParts.push('May involve design or engineering services — review scope');
+    else confParts.push('Design scope unclear — verify whether A&E services are needed');
+    if (finalBudget) confParts.push(`Estimated budget: ${finalBudget}`);
     if (childEnriched) {
       const typeDesc = childTypeLabel(bestChildLink?.linkType || 'source_document').toLowerCase();
       if (childEnrichment?.pdfParsed) {
@@ -2756,11 +2989,15 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     const wcCtx = (fullContext || '').toLowerCase();
     const srcFamily = src.source_family || src.category || '';
     if (/tif|tax increment|urban renewal|tedd|targeted economic|urd/i.test(wcCtx)) watchCategory = 'tif_district';
-    else if (/redevelopment|renewal|revitalization/i.test(wcCtx)) watchCategory = 'redevelopment_area';
+    else if (/redevelopment|renewal|revitalization|catalyst\s+site/i.test(wcCtx)) watchCategory = 'redevelopment_area';
+    else if (/\b(development\s+(park|opportunity|target)|industrial\s+park|business\s+park|commerce\s+park|technology\s+park)\b/i.test(wcCtx)) watchCategory = 'redevelopment_area';
+    else if (/\b(major\s+project|corridor\s+(plan|development|improvement)|downtown\s+(plan|development|improvement)|riverfront\s+(plan|development|improvement))\b/i.test(wcCtx)) watchCategory = 'redevelopment_area';
     else if (/annexation/i.test(wcCtx)) watchCategory = 'annexation_area';
     else if (/master plan|long.?range|lrbp|campus/i.test(wcCtx)) watchCategory = 'development_program';
     // v31: Budget/CIP-derived items get a clear label
     else if (srcFamily === 'SF-08' || /\b(capital improvement|cip|capital budget|capital plan|adopted budget|preliminary budget|capital project)\b/i.test(wcCtx)) watchCategory = 'capital_budget';
+    // Strategic watch: named opportunity areas with proper names (reusable across cities/counties)
+    else if (leadClass === 'strategic_watch') watchCategory = 'redevelopment_area';
     else if (status === 'watch') watchCategory = 'named_project';
 
     // Detect projectStatus from context
@@ -2805,6 +3042,7 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       status, leadClass, leadOrigin: 'live',
       source_document_type: docType.isStrategy ? docType.documentType : 'standard',
       watchCategory, projectStatus, extractionPath: extractionPath || 'pattern',
+      containerChild: extractionPath === 'container_child' || false, // v3.5: flag for container-decomposed leads
       sourceName: src.name, sourceUrl: src.url, sourceId: src.id,
       evidenceLinks: [...new Set([evidenceUrl, src.url])],
       evidenceSourceLinks,
@@ -2830,6 +3068,68 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
         pdfError: (!childEnriched && childEnrichment?.pdfError) ? childEnrichment.pdfError : null,
       }],
     });
+  }
+
+  // ── v32: District-level parent lead ──
+  // If the source is a named redevelopment district / opportunity area and we extracted
+  // subproject-level leads, also emit the district itself as a strategic_watch parent.
+  // This preserves both layers: the district as a strategic geography + individual projects.
+  if (isDistrictSource && leads.length > 0) {
+    const srcName = (src.name || '').trim();
+    const srcOrg = (src.organization || '').trim();
+    // Check if the source name itself is a meaningful district/area name (not generic)
+    const isNamedDistrict = /\b(urd|tif|tedd|urban renewal|redevelopment|district|development (park|opportunity)|major.?project|corridor|triangle|crossing|commons)\b/i.test(srcName);
+    // Only add if we don't already have a lead with a very similar title
+    const districtTitle = srcName.length >= 12 ? cleanTitle(srcName) : null;
+    const alreadyHasDistrict = districtTitle && leads.some(l => {
+      const normA = (l.title || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      const normB = districtTitle.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      return normA === normB || normA.includes(normB) || normB.includes(normA);
+    });
+
+    if (isNamedDistrict && districtTitle && !alreadyHasDistrict && districtTitle.length >= 12) {
+      const districtId = `lead-${Date.now()}-district-${Math.random().toString(36).slice(2,7)}`;
+      const subprojectNames = leads.map(l => l.title).filter(Boolean).slice(0, 5);
+      const districtDesc = subprojectNames.length > 0
+        ? `Strategic redevelopment area with ${leads.length} associated project(s): ${subprojectNames.join(', ')}. Source: ${srcOrg || srcName}.`
+        : `Strategic redevelopment area monitored for future A&E opportunities. Source: ${srcOrg || srcName}.`;
+
+      leads.push({
+        id: districtId,
+        title: districtTitle,
+        owner: srcOrg || '',
+        projectName: districtTitle,
+        location: src.location || '', county: src.county || '', geography: src.geography || '',
+        marketSector: 'Mixed Use',
+        projectType: 'Other',
+        description: districtDesc,
+        whyItMatters: `Named strategic redevelopment area that may generate future A&E work across multiple projects.`,
+        aiReasonForAddition: 'Strategic district/area watch — monitors a redevelopment geography for future pursuit opportunities.',
+        potentialTimeline: '', potentialBudget: '',
+        action_due_date: '',
+        relevanceScore: 40, pursuitScore: 25, sourceConfidenceScore: 50,
+        confidenceNotes: `Strategic district watch. Source: ${src.category || 'Unknown'}. Contains ${leads.length - 1} associated project leads.`,
+        dateDiscovered: now, originalSignalDate: now, lastCheckedDate: now,
+        status: 'watch', leadClass: 'strategic_watch', leadOrigin: 'live',
+        watchCategory: 'redevelopment_area', projectStatus: 'future_watch',
+        extractionPath: 'district_parent',
+        sourceName: src.name, sourceUrl: src.url, sourceId: src.id,
+        evidenceLinks: [src.url],
+        evidenceSourceLinks: [{ url: src.url, label: src.name, linkType: 'source_page' }],
+        evidenceSummary: `Strategic district: ${districtTitle}. ${districtDesc}`,
+        matchedFocusPoints: [], matchedKeywords: [], matchedTargetOrgs: [],
+        taxonomyMatches: [],
+        internalContact: '', notes: '',
+        evidence: [{
+          id: `ev-${districtId}`, leadId: districtId, sourceId: src.id, sourceName: src.name,
+          url: src.url, title: `Strategic district: ${districtTitle}`,
+          summary: districtDesc, signalDate: now, dateFound: now,
+          signalStrength: 'medium', keywords: [],
+          childLinks: [], enrichedFromChild: false,
+        }],
+      });
+      log(`  📍 District parent lead added: "${districtTitle}" (${leads.length - 1} subprojects)`);
+    }
   }
 
   return leads;

@@ -4799,6 +4799,52 @@ const TABS = [
  * Defined at module level (not inside the component) so it can be called from both
  * the one-time cleanup effect and the engine merge callback without hook ordering issues.
  */
+/**
+ * Translate internal prune reason codes into plain-English business explanations.
+ * Returns { label, explanation, keepHint } for display in prune review.
+ */
+function translatePruneReason(reason, lead) {
+  const r = (reason || '').toLowerCase();
+  const title = lead?.title || '';
+
+  // Taxonomy-driven
+  if (r.startsWith('taxonomy_excluded:') || r.startsWith('taxonomy_downrank:')) {
+    const label = reason.split(':').slice(1).join(':').trim();
+    return {
+      label: `Taxonomy: ${label}`,
+      explanation: `Matched the "${label}" taxonomy rule. This category is usually not an A&E project opportunity. If this specific item IS relevant, mark it Immune.`,
+      keepHint: 'Keep if this item involves real design, planning, or construction scope despite the category.',
+    };
+  }
+  // Already claimed
+  if (r.includes('already_claimed_awarded')) return { label: 'Likely already awarded', explanation: 'Source text suggests this project has already been awarded to another firm or contractor.', keepHint: 'Keep if a new phase or re-solicitation is expected.' };
+  if (r.includes('already_claimed_has_designer')) return { label: 'Designer already selected', explanation: 'Source text indicates an architect or designer has already been selected for this project.', keepHint: 'Keep if additional phases or subconsultant opportunities may exist.' };
+  if (r.includes('already_claimed_has_contractor')) return { label: 'Contractor already selected', explanation: 'Source text indicates a contractor or CM has already been engaged for this project.', keepHint: 'Keep if the project may still need additional design services.' };
+  if (r.includes('already_claimed_under_construction')) return { label: 'Already under construction', explanation: 'Source text suggests this project is already in the construction phase.', keepHint: 'Keep if future phases or expansion work are anticipated.' };
+  if (r.includes('already_claimed_completed')) return { label: 'Project appears completed', explanation: 'Source text references ribbon-cutting, completion, or grand opening for this project.', keepHint: 'Keep if a follow-on project or new phase is expected.' };
+  // Noise/generic
+  if (r === 'noise_title') return { label: 'Non-project content', explanation: 'This title matches patterns typical of administrative pages, governance documents, or non-project content rather than a real A&E opportunity.', keepHint: 'Keep if the item actually represents a real facility, capital, or design project.' };
+  if (r === 'generic_weak_fit') return { label: 'Weak service fit', explanation: 'This lead scored below typical thresholds for A&E service alignment. The market sector and project type are too generic to be confident.', keepHint: 'Keep if you know this is a real project with design scope.' };
+  if (r === 'below_relevance_threshold') return { label: 'Low relevance score', explanation: 'This lead scored below the minimum relevance threshold, suggesting weak source evidence for a real A&E opportunity.', keepHint: 'Keep if you have additional context that supports this as a real project.' };
+  if (r === 'infrastructure_no_building') return { label: 'Infrastructure only — no building scope', explanation: 'This appears to be pure infrastructure work (roads, utilities, civil) without a building or facility design component.', keepHint: 'Keep if the project includes a treatment plant, pump station, or other facility design.' };
+  if (r === 'civil_commodity_no_building') return { label: 'Civil/commodity work only', explanation: 'This appears to be civil construction, paving, or commodity work without architectural or engineering design scope.', keepHint: 'Keep if the project includes building or facility design elements.' };
+  // Watch-specific
+  if (r === 'watch_generic_plan_heading') return { label: 'Generic plan or budget heading', explanation: 'This title looks like a budget section heading or planning document title rather than a specific project.', keepHint: 'Keep if this heading represents a specific capital project with design scope.' };
+  if (r === 'watch_budget_purpose') return { label: 'Budget purpose statement', explanation: 'This appears to be a budget category or tax purpose description rather than a specific project.', keepHint: 'Keep if the budget line item funds specific facility or design work.' };
+  if (r === 'watch_housing_strategy') return { label: 'Housing policy/strategy document', explanation: 'This appears to be a housing strategy or policy document rather than a specific construction or design project.', keepHint: 'Keep if specific housing construction or design projects are included.' };
+  if (r === 'watch_bid_no_building') return { label: 'Business district — no building scope', explanation: 'This is a Business Improvement District reference without evidence of building construction or design projects.', keepHint: 'Keep if the BID is funding specific building or facility improvements.' };
+  // Near duplicate
+  if (r.startsWith('near_duplicate_of:')) return { label: 'Near-duplicate', explanation: `This lead appears very similar to another item already on the board: "${reason.split(':')[1]?.trim() || ''}".`, keepHint: 'Keep if these are actually different projects despite similar names.' };
+  // Generic fallback
+  if (r.includes('generic_fallback') || r.includes('generic_solicitation')) return { label: 'Generic portal page', explanation: 'This title appears to be a procurement portal or listing page heading rather than a specific project.', keepHint: 'Keep if this is actually a named project, not just a portal page.' };
+  // Default
+  return {
+    label: reason?.replace('Auto-prune candidate: ', '').replace(/_/g, ' ') || 'Review needed',
+    explanation: 'This lead was flagged by quality checks. Review the details below to decide whether it represents a real A&E opportunity.',
+    keepHint: 'Keep if this item involves real design, construction, or facility planning scope.',
+  };
+}
+
 function boardQualityPrune(currentLeads, taxonomy = []) {
   const MIN_RELEVANCE_ACTIVE = 35;
   const MIN_RELEVANCE_WATCH = 30;  // Watch leads score lower (no RFQ/RFP boost) — gentler but not permissive
@@ -5053,6 +5099,11 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
     //   - Regulation / Policy / Admin → TAX-NOI-013
     //
     // REMAINING hard-coded (structural patterns, not keyword-matchable):
+    // v3.5: Listing/program/container page titles — these are source pages, not projects
+    // "Bid Solicitations", "Capital Improvement", "City Bids", "Current Projects"
+    if (/^(bid\s+solicitations?|current\s+(projects?|bids?|solicitations?|rfps?|rfqs?)|city\s+(bids?|projects?)|municipal\s+(bids?|projects?)|public\s+(works?\s+)?(bids?|projects?)|capital\s+improvement|open\s+(bids?|solicitations?))\s*$/i.test(lo.trim())) return true;
+    // "Org — Bid Solicitations" / "Org — Capital Improvement" cross-product container titles
+    if (/^[\w\s&'.,()]+\s*[–—-]\s*(bid\s+solicitations?|capital\s+improvement|current\s+(bids?|projects?|solicitations?)|public\s+(works?|bids?))\s*$/i.test(lo)) return true;
     // Service description fragments
     if (/^(we\s+provide|our\s+mission|about\s+us|who\s+we\s+are|what\s+we\s+do|our\s+services)\b/i.test(lo.trim())) return true;
     // ── v26: Already-claimed/awarded project indicators ──
@@ -5332,22 +5383,22 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
         // Strategic watch items go directly to review — never auto-pruned except for claimed evidence
         reviewQueue.push({
           lead,
-          reason: `Strategic watch candidate: ${reason}`,
-          explanation: `This is a strategic watch item (${lead.watchCategory || lead.leadClass || 'named area'}). It was flagged for "${reason}" but strategic watch items are protected. Review to decide.`,
+          reason: 'Strategic watch review',
+          explanation: `This is a strategic watch item (${lead.watchCategory || lead.leadClass || 'named area'}). It was also flagged as "${translatePruneReason(reason, lead).label}" but strategic watch items are protected from auto-removal. Review to confirm it should stay.`,
+          keepHint: 'Strategic watch items track future project-generator areas. Keep unless clearly irrelevant.',
         });
         console.log(`[Board Prune] 📍 "${lead.title}" — ${reason} → protected strategic watch (review only)`);
       } else if (isWatch && !WATCH_STRONG_AUTO_REMOVE.has(reason)) {
         // Demote to Tier 2 review instead of auto-removing
-        const isTaxDriven = reason.startsWith('taxonomy_');
-        const taxLabel = isTaxDriven ? reason.split(':').slice(1).join(':') : null;
+        const translated = translatePruneReason(reason, lead);
         reviewQueue.push({
           lead,
-          reason: isTaxDriven ? `Taxonomy: ${taxLabel}` : `Auto-prune candidate: ${reason}`,
-          explanation: isTaxDriven
-            ? `Matched taxonomy rule "${taxLabel}" (${reason.startsWith('taxonomy_excluded') ? 'Exclude' : 'Downrank'}). Edit this rule in Taxonomy → Noise / Exclusion to change behavior.`
-            : `This Watch lead was flagged for removal (${reason}) but may still be a legitimate project generator. Review to decide whether to keep, pause, or prune.`,
+          reason: translated.label,
+          explanation: translated.explanation,
+          keepHint: translated.keepHint,
+          internalReason: reason, // preserve for debugging
         });
-        console.log(`[Board Prune] ⚠ "${lead.title}" — ${reason} → demoted to review ${isTaxDriven ? '(taxonomy-driven)' : '(Watch recall lockdown)'}`);
+        console.log(`[Board Prune] ⚠ "${lead.title}" — ${reason} → demoted to review: ${translated.label}`);
       } else {
         pruned.push({ id: lead.id, title: lead.title, relevanceScore: lead.relevanceScore, reason });
         console.log(`[Board Prune] ✂ "${lead.title}" — ${reason} (score: ${lead.relevanceScore || 0})`);
@@ -5517,13 +5568,15 @@ export default function ProjectScout() {
         const mergeById = (localArr, sharedArr) => {
           if (!Array.isArray(localArr)) localArr = [];
           if (!Array.isArray(sharedArr)) sharedArr = [];
-          const localIds = new Set(localArr.map(item => item.id).filter(Boolean));
-          // Start with all local items
+          // Extract ID from item — handles both lead records (item.id) and
+          // review queue items (item.lead.id) and prune memory (item.id)
+          const getId = (item) => item?.id || item?.lead?.id || null;
+          const localIds = new Set(localArr.map(getId).filter(Boolean));
           const result = [...localArr];
-          // Add shared items whose IDs are NOT in local (additions from other sessions)
           let added = 0;
           for (const item of sharedArr) {
-            if (item.id && !localIds.has(item.id)) {
+            const id = getId(item);
+            if (id && !localIds.has(id)) {
               result.push(item);
               added++;
             }
@@ -5733,8 +5786,13 @@ export default function ProjectScout() {
   const [boardCleanupDone, setBoardCleanupDone] = useState(false);
   useEffect(() => {
     if (boardCleanupDone) return;
+    // v32: Wait for shared sync to complete before running cleanup.
+    // Without this, cleanup runs on initial empty state before shared restore populates leads,
+    // finds 0 items, sets done=true, and never re-runs when the real leads arrive.
+    if (sharedStoreStatus === 'checking') return; // Still checking shared store health
+    if (sharedStoreStatus === 'connected' && !sharedSyncReady.current) return; // Connected but sync not done yet
     const cleanupVersion = localStorage.getItem('ps_board_cleanup_version');
-    const CURRENT_CLEANUP_VERSION = '2026-03-22-v32'; // v32: Re-evaluate existing leads with current quality gates + prune review queue fix
+    const CURRENT_CLEANUP_VERSION = '2026-03-23-v35'; // v35: Stale container/listing parent cleanup + child title normalization
     if (cleanupVersion === CURRENT_CLEANUP_VERSION) { setBoardCleanupDone(true); return; }
 
     // Apply quality gates to all existing leads
@@ -5835,7 +5893,7 @@ export default function ProjectScout() {
 
     localStorage.setItem('ps_board_cleanup_version', CURRENT_CLEANUP_VERSION);
     setBoardCleanupDone(true);
-  }, [leads, boardCleanupDone]);
+  }, [leads, boardCleanupDone, sharedStoreStatus]);
 
   // ─── One-time v30 recall migration ────────────────────────────
   // Earlier cleanup versions (v27-v29) silently discarded system-pruned leads.
@@ -6989,6 +7047,28 @@ export default function ProjectScout() {
               return prev;
             });
           }
+          // ── v3.5: Container-child parent replacement ──
+          // When container-child leads arrive from a source, remove existing generic
+          // parent-page leads from the same source that the children supersede.
+          const containerChildren = qualityNew.filter(l => l.containerChild);
+          if (containerChildren.length > 0) {
+            const containerSourceIds = new Set(containerChildren.map(l => l.sourceId).filter(Boolean));
+            const staleParentIds = [];
+            for (const existing of board) {
+              if (!existing.sourceId || !containerSourceIds.has(existing.sourceId)) continue;
+              // If existing lead from same source has a generic fallback title pattern, it's a stale parent
+              const elo = (existing.title || '').toLowerCase();
+              if (/^[\w\s&'.,()]+\s*[–—-]\s*(capital improvement|solicitation|project signal|bid solicitations?|current (projects?|bids?|solicitations?))$/i.test(elo) ||
+                  /^(bid solicitations?|current (projects?|bids?|solicitations?)|capital improvement|public (works?|bids?))$/i.test(elo.trim())) {
+                staleParentIds.push(existing.id);
+                console.log(`[Container] Replacing stale parent: "${existing.title}" (superseded by ${containerChildren.length} child leads)`);
+              }
+            }
+            if (staleParentIds.length > 0) {
+              const staleSet = new Set(staleParentIds);
+              board = board.filter(l => !staleSet.has(l.id));
+            }
+          }
           board = [...qualityNew, ...board];
         }
       }
@@ -7458,11 +7538,28 @@ function PruningReviewModal({ queue, onImmune, onPause, onPrune, onActivate, onK
           <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', padding:4, color:'#94a3b8' }}><X size={18} /></button>
         </div>
 
-        {/* Reason + confidence badge */}
-        <div style={{ padding:'10px 22px', background: confBg, borderBottom:'1px solid #f1f5f9', flexShrink:0, display:'flex', gap:8, alignItems:'flex-start', flexWrap:'wrap' }}>
-          <span style={{ fontSize:10.5, fontWeight:700, padding:'2px 8px', borderRadius:4, background:'#fef3c7', color:'#92400e' }}>{item.reason}</span>
-          <span style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:4, background: confBg, color: confColor, border:`1px solid ${confColor}30` }}>{confLabel}</span>
-          <p style={{ fontSize:12, color:'#78716c', margin:'4px 0 0', lineHeight:1.5, width:'100%' }}>{item.explanation}</p>
+        {/* Reason + confidence + explanation */}
+        <div style={{ padding:'12px 22px', background: confBg, borderBottom:'1px solid #f1f5f9', flexShrink:0 }}>
+          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:8 }}>
+            <span style={{ fontSize:10.5, fontWeight:700, padding:'3px 10px', borderRadius:4, background: confBg, color: confColor, border:`1px solid ${confColor}30` }}>{confLabel}</span>
+            <span style={{ fontSize:10.5, fontWeight:700, padding:'3px 10px', borderRadius:4, background:'#f1f5f9', color:'#475569' }}>
+              {item.reason || 'Review needed'}
+            </span>
+          </div>
+          <div style={{ fontSize:12.5, color:'#334155', lineHeight:1.65, margin:'0 0 6px' }}>
+            <strong style={{ color:'#0f172a' }}>Why flagged: </strong>
+            {item.explanation || 'This lead was flagged by quality checks. Review the details to decide whether to keep or prune.'}
+          </div>
+          {item.keepHint && (
+            <div style={{ fontSize:11.5, color:'#065f46', lineHeight:1.5, padding:'5px 10px', borderRadius:6, background:'#ecfdf5', border:'1px solid #a7f3d0' }}>
+              <strong>💡 When to keep: </strong>{item.keepHint}
+            </div>
+          )}
+          {lead.confidenceNotes && (
+            <div style={{ fontSize:11, color:'#64748b', marginTop:8, lineHeight:1.5, borderTop:'1px solid #e2e8f0', paddingTop:6 }}>
+              <strong>Source context: </strong>{(lead.confidenceNotes || '').slice(0, 250)}
+            </div>
+          )}
           {item.learned && item.learned.totalSimilar > 0 && (
             <div style={{ marginTop:6, padding:'6px 10px', borderRadius:6, background: item.learned.learnedConfidence === 'suppress' ? '#ecfdf5' : item.learned.learnedConfidence === 'lower' ? '#eff6ff' : item.learned.learnedConfidence === 'higher' ? '#fef2f2' : '#f8fafc', border:'1px solid #e2e8f0', fontSize:11, lineHeight:1.4 }}>
               <span style={{ fontWeight:700, color: item.learned.learnedConfidence === 'suppress' ? '#065f46' : item.learned.learnedConfidence === 'lower' ? '#1e40af' : item.learned.learnedConfidence === 'higher' ? '#991b1b' : '#64748b' }}>
