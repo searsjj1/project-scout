@@ -7137,30 +7137,45 @@ export default function ProjectScout() {
         return lead;
       });
 
-      // ── v3.5: District dedup — prevent same district flooding the board ──
-      // If multiple leads reference the same URD/TIF/TEDD/district, keep the highest-scoring one
-      const districtLeads = board.filter(l => /\b(urd|tif|tedd|urban\s+renewal|redevelopment\s+(area|district|zone))\b/i.test(l.title || ''));
-      if (districtLeads.length > 1) {
+      // ── v3.5: Canonical district dedup — prevent same area flooding the board ──
+      // Catches URD/TIF/TEDD references AND named strategic areas (Midtown Commons, Riverfront Triangle, etc.)
+      // that may appear from multiple sources as near-identical cards.
+      const isStrategicArea = (l) => {
+        const t = (l.title || '').toLowerCase();
+        return /\b(urd|tif|tedd|urban\s+renewal|redevelopment\s+(area|district|zone))\b/i.test(t) ||
+          l.leadClass === 'strategic_watch' ||
+          l.watchCategory === 'redevelopment_area' || l.watchCategory === 'tif_district' ||
+          /\b(crossing|triangle|corridor|commons|block|mill|yard|development\s+park|catalyst\s+site)\b/i.test(t);
+      };
+      const strategicLeads = board.filter(isStrategicArea);
+      if (strategicLeads.length > 1) {
         const districtGroups = new Map();
-        for (const dl of districtLeads) {
-          // Normalize district name for grouping
-          const norm = (dl.title || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+(urd|tif|tedd|urban renewal|redevelopment|district|area|zone|development)\b/g, '').trim();
-          const key = norm.split(/\s+/).filter(w => w.length > 2).slice(0, 3).join(' ');
+        const STOP_WORDS = new Set(['the','and','for','from','with','this','that','new','all','project','district','area','zone','development','redevelopment','urban','renewal','tif','urd','tedd','plan','strategic']);
+        for (const dl of strategicLeads) {
+          // Normalize: strip district/area suffixes, keep core proper-name words
+          const words = (dl.title || '').replace(/[^a-zA-Z0-9\s]/g, '').split(/\s+/)
+            .filter(w => w.length > 1 && !STOP_WORDS.has(w.toLowerCase()));
+          const key = words.slice(0, 3).map(w => w.toLowerCase()).join(' ');
+          if (key.length < 3) continue; // Skip very short keys that would over-merge
           if (!districtGroups.has(key)) districtGroups.set(key, []);
           districtGroups.get(key).push(dl);
         }
         const dupeDistrictIds = new Set();
         for (const [, group] of districtGroups) {
           if (group.length <= 1) continue;
-          // Keep the one with highest relevance score; mark others for prune review
-          group.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+          // Keep the one with highest score or immune; route others to prune review
+          group.sort((a, b) => {
+            if (a.pruneImmune && !b.pruneImmune) return -1;
+            if (b.pruneImmune && !a.pruneImmune) return 1;
+            return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+          });
           for (let i = 1; i < group.length; i++) {
+            if (group[i].pruneImmune) continue; // Never auto-dedup immune items
             dupeDistrictIds.add(group[i].id);
             console.log(`[District Dedup] Duplicate: "${group[i].title}" — keeping "${group[0].title}"`);
           }
         }
         if (dupeDistrictIds.size > 0) {
-          // Route dupes to prune review instead of silently removing
           const dupLeads = board.filter(l => dupeDistrictIds.has(l.id));
           board = board.filter(l => !dupeDistrictIds.has(l.id));
           setPruningReviewQueue(prev => {
@@ -7168,8 +7183,8 @@ export default function ProjectScout() {
             const fresh = dupLeads.filter(l => !existingIds.has(l.id)).map(l => ({
               lead: l,
               reason: 'Duplicate district reference',
-              explanation: `This district/area appears to duplicate another item on the board. Multiple sources may reference the same redevelopment area.`,
-              keepHint: 'Prune if the existing district item already covers this area.',
+              explanation: `This area appears to duplicate another strategic watch item already on the board. Multiple sources may reference the same redevelopment area or opportunity site.`,
+              keepHint: 'Prune if the existing item already covers this area. Keep if this reference adds materially different project information.',
             }));
             if (fresh.length > 0) setPruneReviewVisible(true);
             return [...prev, ...fresh];

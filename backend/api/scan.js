@@ -2614,14 +2614,20 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       const hasOwnProcurement = /\b(?:rfq|rfp|invitation\s+to\s+bid|request\s+for\s+(?:qualifications?|proposals?)|solicitation|bid\s+#|submit\s+by|due\s+date|closing\s+date|selection\s+committee|design\s+services\s+(?:for|needed|required|sought))\b/.test(candidateLo);
       // Exception: named local opportunity areas / redevelopment targets in strategy docs
       // should still surface as strategic Watch items (they are intelligence signals even without active RFQ)
-      const isNamedOpArea = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park)\b/i.test(candidateLo) && /[A-Z][a-z]{2,}/.test(matchText || '');
+      const isNamedOpArea = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park|log\s+yard|interchange|gateway|town\s*center|business\s+park|industrial\s+park|commerce\s+park|technology\s+park|catalyst\s+site|opportunity\s+(site|zone|area))\b/i.test(candidateLo) && /[A-Z][a-z]{2,}/.test(matchText || '');
       const isNamedRedevelopment = /\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(candidateLo);
-      if (!hasOwnProcurement && !isNamedOpArea && !isNamedRedevelopment) {
+      // v3.5: Source-aware escape — if this is from an economic development / MEP / redevelopment source,
+      // allow named headings through even if they don't match the place-type keyword list,
+      // as long as they have a proper name and look like a real named area/site (not boilerplate)
+      const isEconDevSource = /economic.?development|economic.?partnership|redevelopment|development.?authority|community.?development/i.test(src.name || src.category || '');
+      const isNamedHeading = isEconDevSource && extractionPath && extractionPath.startsWith('html_') &&
+        /[A-Z][a-z]{2,}/.test(matchText || '') && (matchText || '').split(/\s+/).length <= 6 &&
+        !/\b(about|contact|staff|board|mission|department|office|faq|resources|links|events|calendar|home)\b/i.test(candidateLo);
+      if (!hasOwnProcurement && !isNamedOpArea && !isNamedRedevelopment && !isNamedHeading) {
         log(`    ⊘ Strategy-doc suppressed (no own procurement signal): "${title}"`);
         continue;
       }
-      if ((isNamedOpArea || isNamedRedevelopment) && !hasOwnProcurement) {
-        // Allow through — will be marked as strategic watch after classification below
+      if ((isNamedOpArea || isNamedRedevelopment || isNamedHeading) && !hasOwnProcurement) {
         log(`    📍 Strategy-doc: named opportunity area "${title}" allowed as strategic watch`);
       }
     }
@@ -2641,10 +2647,13 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     // Override classification for named opportunity areas from strategy docs
     if (docType.isStrategy) {
       const candidateLo2 = (matchText || '').toLowerCase();
-      const isOpArea2 = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park)\b/i.test(candidateLo2) && /[A-Z][a-z]{2,}/.test(matchText || '');
+      const isOpArea2 = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park|log\s+yard|interchange|gateway|town\s*center|business\s+park|industrial\s+park|commerce\s+park|technology\s+park|catalyst\s+site|opportunity\s+(site|zone|area))\b/i.test(candidateLo2) && /[A-Z][a-z]{2,}/.test(matchText || '');
       const isRedev2 = /\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(candidateLo2);
+      const isEconDevSrc2 = /economic.?development|economic.?partnership|redevelopment|development.?authority/i.test(src.name || src.category || '');
+      const isNamedHdg2 = isEconDevSrc2 && extractionPath && extractionPath.startsWith('html_') &&
+        /[A-Z][a-z]{2,}/.test(matchText || '') && (matchText || '').split(/\s+/).length <= 6;
       const hasProc2 = /\b(?:rfq|rfp|solicitation|bid\s+#|due\s+date)\b/.test(candidateLo2);
-      if ((isOpArea2 || isRedev2) && !hasProc2) {
+      if ((isOpArea2 || isRedev2 || isNamedHdg2) && !hasProc2) {
         status = 'watch';
         leadClass = 'strategic_watch';
       }
