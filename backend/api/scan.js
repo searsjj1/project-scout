@@ -2409,7 +2409,9 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     for (const { re, tag } of htmlPatterns) {
       for (const hm of rawHtml.matchAll(re)) {
         const headingText = stripHtml(hm[1]);
-        const minLen = (tag === 'deflist') ? 8 : 10;
+        // v3.5: Lower min length for econ-dev sources to catch short site names like "Wye"
+        const isEconDevSrcLen = /economic.?development|economic.?partnership|redevelopment|development.?authority/i.test(src.name || src.category || '');
+        const minLen = isEconDevSrcLen ? 3 : (tag === 'deflist') ? 8 : 10;
         if (headingText.length < minLen || headingText.length > 200) continue;
         if (isNavigationJunk(headingText)) continue;
         if (isPortalFragmentTitle(headingText)) continue;
@@ -2418,7 +2420,18 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
         if (/^\s*[\$\d,.\s%()-]+\s*$/.test(headingText)) continue;
         if (/^\s*(FY\s*\d{2,4}|Q[1-4]|20\d{2})\s*$/i.test(headingText.trim())) continue;
         const needsProjectWord = tag === 'link' || tag === 'list_item' || tag === 'deflist';
-        if (needsProjectWord && !PROJECT_TITLE_WORDS.test(headingText) && !/\b(redevelopment|development|corridor|triangle|downtown|midtown|district|commons|crossing|replacement|upgrade|modernization|renovation|expansion|addition|maintenance|improvement|repair|rehabilitation|restoration|retrofit)\b/i.test(headingText)) continue;
+        // v3.5: For econ-dev/MEP/redevelopment sources, relax the project-word requirement
+        // to allow named site/opportunity links through (e.g., "Bonner Mill", "Wye 2")
+        const isEconDevSrc = /economic.?development|economic.?partnership|redevelopment|development.?authority|community.?development/i.test(src.name || src.category || '');
+        const isLikelyEntityNotSite = /\b(architect\w*|engineering|design\s+(firm|group)|construction|contracting|consulting|hospital|health|medical|university|college|foundation|association|partnership|chamber|council|agency|authority|commission|corporation|inc\.?|llc|ltd|group|associates|services)\b/i.test(headingText.toLowerCase());
+        if (needsProjectWord && !isEconDevSrc) {
+          if (!PROJECT_TITLE_WORDS.test(headingText) && !/\b(redevelopment|development|corridor|triangle|downtown|midtown|district|commons|crossing|replacement|upgrade|modernization|renovation|expansion|addition|maintenance|improvement|repair|rehabilitation|restoration|retrofit|mill|yard|park|gateway|interchange|site)\b/i.test(headingText)) continue;
+        } else if (needsProjectWord && isEconDevSrc) {
+          // For econ-dev sources: allow proper-named items but block entity/company names
+          if (isLikelyEntityNotSite) continue;
+          if (!/[A-Z][a-z]{2,}/.test(headingText)) continue; // must have a proper name
+          if (headingText.split(/\s+/).length > 8) continue; // too long for a site name
+        }
 
         const key = headingText.slice(0, 50).toLowerCase().replace(/[^a-z0-9]/g, '');
         if (seen.has(key)) continue;
@@ -2617,18 +2630,22 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       const isNamedOpArea = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park|log\s+yard|interchange|gateway|town\s*center|business\s+park|industrial\s+park|commerce\s+park|technology\s+park|catalyst\s+site|opportunity\s+(site|zone|area))\b/i.test(candidateLo) && /[A-Z][a-z]{2,}/.test(matchText || '');
       const isNamedRedevelopment = /\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(candidateLo);
       // v3.5: Source-aware escape — if this is from an economic development / MEP / redevelopment source,
-      // allow named headings through even if they don't match the place-type keyword list,
-      // as long as they have a proper name and look like a real named area/site (not boilerplate)
+      // allow named headings AND named link items through even if they don't match the place-type keyword list,
+      // as long as they have a proper name and look like a real named area/site (not an entity/company)
       const isEconDevSource = /economic.?development|economic.?partnership|redevelopment|development.?authority|community.?development/i.test(src.name || src.category || '');
-      const isNamedHeading = isEconDevSource && extractionPath && extractionPath.startsWith('html_') &&
-        /[A-Z][a-z]{2,}/.test(matchText || '') && (matchText || '').split(/\s+/).length <= 6 &&
-        !/\b(about|contact|staff|board|mission|department|office|faq|resources|links|events|calendar|home)\b/i.test(candidateLo);
-      if (!hasOwnProcurement && !isNamedOpArea && !isNamedRedevelopment && !isNamedHeading) {
+      // Entity/company name filter — block firm names, hospital systems, orgs, partnerships, chambers
+      const isEntityName = /\b(architect\w*|engineering|design\s+(firm|group|studio)|construction|contracting|consulting|hospital|health\s+system|medical|university|college|foundation|association|partnership|chamber|council|agency|authority|commission|corporation|inc\.?|llc|ltd|pllc|pllp|group|associates|services|bank|credit\s+union|insurance|realty|real\s+estate|law\s+(firm|office)|attorney|accounting)\b/i.test(candidateLo);
+      const isNamedSite = isEconDevSource &&
+        extractionPath && (extractionPath.startsWith('html_') || extractionPath === 'container_child') &&
+        /[A-Z][a-z]{2,}/.test(matchText || '') && (matchText || '').split(/\s+/).length <= 8 &&
+        !isEntityName &&
+        !/\b(about|contact|staff|board|mission|department|office|faq|resources|links|events|calendar|home|login|sign\s+in|subscribe|newsletter)\b/i.test(candidateLo);
+      if (!hasOwnProcurement && !isNamedOpArea && !isNamedRedevelopment && !isNamedSite) {
         log(`    ⊘ Strategy-doc suppressed (no own procurement signal): "${title}"`);
         continue;
       }
-      if ((isNamedOpArea || isNamedRedevelopment || isNamedHeading) && !hasOwnProcurement) {
-        log(`    📍 Strategy-doc: named opportunity area "${title}" allowed as strategic watch`);
+      if ((isNamedOpArea || isNamedRedevelopment || isNamedSite) && !hasOwnProcurement) {
+        log(`    📍 Strategy-doc: named opportunity area "${title}" allowed as strategic watch (${isNamedOpArea ? 'opArea' : isNamedRedevelopment ? 'redev' : 'namedSite'})`);
       }
     }
 
@@ -2650,10 +2667,12 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       const isOpArea2 = /\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|station|depot|development\s+park|log\s+yard|interchange|gateway|town\s*center|business\s+park|industrial\s+park|commerce\s+park|technology\s+park|catalyst\s+site|opportunity\s+(site|zone|area))\b/i.test(candidateLo2) && /[A-Z][a-z]{2,}/.test(matchText || '');
       const isRedev2 = /\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(candidateLo2);
       const isEconDevSrc2 = /economic.?development|economic.?partnership|redevelopment|development.?authority/i.test(src.name || src.category || '');
-      const isNamedHdg2 = isEconDevSrc2 && extractionPath && extractionPath.startsWith('html_') &&
-        /[A-Z][a-z]{2,}/.test(matchText || '') && (matchText || '').split(/\s+/).length <= 6;
+      const isEntity2 = /\b(architect\w*|engineering|design\s+(firm|group|studio)|construction|contracting|consulting|hospital|health\s+system|medical|university|college|foundation|association|partnership|chamber|council|agency|authority|commission|corporation|inc\.?|llc|ltd|group|associates|services)\b/i.test(candidateLo2);
+      const isNamedSite2 = isEconDevSrc2 &&
+        extractionPath && (extractionPath.startsWith('html_') || extractionPath === 'container_child') &&
+        /[A-Z][a-z]{2,}/.test(matchText || '') && (matchText || '').split(/\s+/).length <= 8 && !isEntity2;
       const hasProc2 = /\b(?:rfq|rfp|solicitation|bid\s+#|due\s+date)\b/.test(candidateLo2);
-      if ((isOpArea2 || isRedev2 || isNamedHdg2) && !hasProc2) {
+      if ((isOpArea2 || isRedev2 || isNamedSite2) && !hasProc2) {
         status = 'watch';
         leadClass = 'strategic_watch';
       }
