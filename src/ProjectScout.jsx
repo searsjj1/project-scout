@@ -809,9 +809,26 @@ function LeadCard({ lead, onClick, style: animStyle }) {
         {lead.projectType && <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Layers size={11} />{lead.projectType}</span>}
       </div>
 
-      {/* Description */}
+      {/* Description — prefer whyItMatters for concise card display, fallback to description */}
       <p style={{ fontSize: 11.5, lineHeight: 1.5, color: '#64748b', margin: '0 0 12px', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-        {lead.description}
+        {(() => {
+          // Use whyItMatters if it's a better card-level summary than the raw description
+          const wim = lead.whyItMatters || '';
+          const desc = lead.description || '';
+          // If whyItMatters is reasonably short and different from the title, prefer it
+          if (wim.length > 30 && wim.length < 300 && wim.toLowerCase() !== (lead.title || '').toLowerCase()) return wim;
+          // Otherwise clean up the description
+          if (desc.length > 0) {
+            // Strip repeated title text from description start
+            const titleLo = (lead.title || '').toLowerCase().slice(0, 40);
+            let clean = desc;
+            if (clean.toLowerCase().startsWith(titleLo) && clean.length > titleLo.length + 20) {
+              clean = clean.slice(titleLo.length).replace(/^\s*[.—–-]\s*/, '').trim();
+            }
+            return clean || desc;
+          }
+          return desc || 'No description available';
+        })()}
       </p>
 
       {/* Scores + Budget/Timeline */}
@@ -4834,7 +4851,10 @@ function translatePruneReason(reason, lead) {
   if (r === 'watch_housing_strategy') return { label: 'Housing policy/strategy document', explanation: 'This appears to be a housing strategy or policy document rather than a specific construction or design project.', keepHint: 'Keep if specific housing construction or design projects are included.' };
   if (r === 'watch_bid_no_building') return { label: 'Business district — no building scope', explanation: 'This is a Business Improvement District reference without evidence of building construction or design projects.', keepHint: 'Keep if the BID is funding specific building or facility improvements.' };
   // Near duplicate
-  if (r.startsWith('near_duplicate_of:')) return { label: 'Near-duplicate', explanation: `This lead appears very similar to another item already on the board: "${reason.split(':')[1]?.trim() || ''}".`, keepHint: 'Keep if these are actually different projects despite similar names.' };
+  if (r.startsWith('near_duplicate_district:')) return { label: 'Duplicate district reference', explanation: `This district/area appears to duplicate another strategic watch item already on the board: "${reason.split(':').slice(1).join(':')?.trim() || ''}". Multiple sources may reference the same district.`, keepHint: 'Prune if the existing district item already covers this area. Keep if this reference adds materially different project information.' };
+  if (r.startsWith('near_duplicate_of:')) return { label: 'Near-duplicate of existing lead', explanation: `This lead appears very similar to another item already on the board: "${reason.split(':').slice(1).join(':')?.trim() || ''}".`, keepHint: 'Keep if these are actually different projects despite similar names.' };
+  // Container/listing page
+  if (r === 'container_parent_page') return { label: 'Parent listing page — not a project', explanation: 'This is a bid solicitations, program, or listing page that contains child solicitations. The actual projects are the individual items listed on this page, not the page itself.', keepHint: 'Prune unless no child solicitations have been extracted.' };
   // Generic fallback
   if (r.includes('generic_fallback') || r.includes('generic_solicitation')) return { label: 'Generic portal page', explanation: 'This title appears to be a procurement portal or listing page heading rather than a specific project.', keepHint: 'Keep if this is actually a named project, not just a portal page.' };
   // Default
@@ -5348,8 +5368,19 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
     // 8. Near-duplicate of a higher-scoring kept lead
     if (!reason) {
       for (const k of kept) {
-        if (wordSim(lead.title, k.title) >= 0.65) {
-          reason = `near_duplicate_of:${k.title.slice(0, 40)}`;
+        const sim = wordSim(lead.title, k.title);
+        if (sim >= 0.65) {
+          // v3.5: Distinguish district-duplicate from project-duplicate
+          const isDistrictLead = /\b(district|urd|tif|tedd|urban\s+renewal|redevelopment\s+area|corridor|triangle)\b/i.test(lead.title || '');
+          const isDistrictKept = /\b(district|urd|tif|tedd|urban\s+renewal|redevelopment\s+area|corridor|triangle)\b/i.test(k.title || '');
+          if (isDistrictLead && isDistrictKept) {
+            reason = `near_duplicate_district:${k.title.slice(0, 50)}`;
+          } else if (sim >= 0.85) {
+            reason = `near_duplicate_of:${k.title.slice(0, 50)}`;
+          } else {
+            // 0.65-0.84 similarity: flag but don't auto-classify as exact dup
+            reason = `near_duplicate_of:${k.title.slice(0, 50)}`;
+          }
           break;
         }
       }
@@ -5835,16 +5866,34 @@ export default function ProjectScout() {
 
     // Backfill pruneImmune on existing manual leads
     let immuneBackfilled = 0;
+    let locationFixed = 0;
     const finalWithImmune = finalKept.map(lead => {
+      let updated = lead;
       if (lead.leadOrigin === 'manual' && !lead.pruneImmune) {
         immuneBackfilled++;
-        return { ...lead, pruneImmune: true };
+        updated = { ...updated, pruneImmune: true };
       }
-      return lead;
+      // v3.5: Fix Idaho/Washington location normalization on existing leads
+      // Leads from Idaho/WA sources may have been stored with ", MT" due to old location logic
+      const loc = (updated.location || '').toLowerCase();
+      const srcUrl = (updated.sourceUrl || '').toLowerCase();
+      const srcName = (updated.sourceName || '').toLowerCase();
+      const idahoCities = ["coeur d'alene", 'boise', 'idaho falls', 'pocatello', 'meridian', 'nampa', 'twin falls', 'lewiston', 'moscow', 'sandpoint', 'post falls'];
+      const idahoCounties = ['kootenai', 'ada', 'canyon', 'bonneville', 'bannock', 'twin falls', 'nez perce', 'latah', 'bonner'];
+      const isIdahoSource = /\.id\b|cdaid|idaho/i.test(srcUrl + ' ' + srcName);
+      const hasIdahoCity = idahoCities.some(c => loc.includes(c));
+      const hasIdahoCounty = idahoCounties.some(c => loc.includes(c));
+      if ((isIdahoSource || hasIdahoCity || hasIdahoCounty) && loc.includes(', mt')) {
+        const fixedLoc = updated.location.replace(/,\s*MT\s*$/i, hasIdahoCity || hasIdahoCounty ? ', ID' : ', ID');
+        console.log(`[Board Cleanup] 📍 Location fix: "${updated.location}" → "${fixedLoc}"`);
+        locationFixed++;
+        updated = { ...updated, location: fixedLoc };
+      }
+      return updated;
     });
 
-    if (pruned.length > 0 || renamed > 0 || descCleaned > 0 || reviewQueue.length > 0 || immuneBackfilled > 0) {
-      console.log(`[Board Cleanup] One-time cleanup: pruning ${pruned.length}, review queue ${reviewQueue.length}, renaming ${renamed}, desc cleaned ${descCleaned}, immune backfilled ${immuneBackfilled}`);
+    if (pruned.length > 0 || renamed > 0 || descCleaned > 0 || reviewQueue.length > 0 || immuneBackfilled > 0 || locationFixed > 0) {
+      console.log(`[Board Cleanup] One-time cleanup: pruning ${pruned.length}, review queue ${reviewQueue.length}, renaming ${renamed}, desc cleaned ${descCleaned}, immune backfilled ${immuneBackfilled}, locations fixed ${locationFixed}`);
       pruned.forEach(p => console.log(`  ✂ "${p.title}" — ${p.reason}`));
       reviewQueue.forEach(r => console.log(`  ⚠ "${r.lead.title}" → review: ${r.reason}`));
       setLeads(finalWithImmune);
@@ -7070,6 +7119,61 @@ export default function ProjectScout() {
             }
           }
           board = [...qualityNew, ...board];
+        }
+      }
+
+      // ── v3.5: Location normalization for all board leads ──
+      // Fix Idaho/Washington leads that were stored with MT state code
+      board = board.map(lead => {
+        const loc = (lead.location || '').toLowerCase();
+        if (!loc.includes(', mt')) return lead;
+        const srcUrl = (lead.sourceUrl || '').toLowerCase();
+        const srcName = (lead.sourceName || '').toLowerCase();
+        const combined = loc + ' ' + srcUrl + ' ' + srcName;
+        const isIdaho = /coeur d.alene|boise|idaho falls|pocatello|meridian|nampa|twin falls|lewiston|moscow|sandpoint|post falls|kootenai|\.id\b|cdaid|idaho/i.test(combined);
+        const isWA = /spokane|seattle|pullman|\.wa\b|washington/i.test(combined);
+        if (isIdaho) return { ...lead, location: lead.location.replace(/,\s*MT\s*$/i, ', ID') };
+        if (isWA) return { ...lead, location: lead.location.replace(/,\s*MT\s*$/i, ', WA') };
+        return lead;
+      });
+
+      // ── v3.5: District dedup — prevent same district flooding the board ──
+      // If multiple leads reference the same URD/TIF/TEDD/district, keep the highest-scoring one
+      const districtLeads = board.filter(l => /\b(urd|tif|tedd|urban\s+renewal|redevelopment\s+(area|district|zone))\b/i.test(l.title || ''));
+      if (districtLeads.length > 1) {
+        const districtGroups = new Map();
+        for (const dl of districtLeads) {
+          // Normalize district name for grouping
+          const norm = (dl.title || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+(urd|tif|tedd|urban renewal|redevelopment|district|area|zone|development)\b/g, '').trim();
+          const key = norm.split(/\s+/).filter(w => w.length > 2).slice(0, 3).join(' ');
+          if (!districtGroups.has(key)) districtGroups.set(key, []);
+          districtGroups.get(key).push(dl);
+        }
+        const dupeDistrictIds = new Set();
+        for (const [, group] of districtGroups) {
+          if (group.length <= 1) continue;
+          // Keep the one with highest relevance score; mark others for prune review
+          group.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+          for (let i = 1; i < group.length; i++) {
+            dupeDistrictIds.add(group[i].id);
+            console.log(`[District Dedup] Duplicate: "${group[i].title}" — keeping "${group[0].title}"`);
+          }
+        }
+        if (dupeDistrictIds.size > 0) {
+          // Route dupes to prune review instead of silently removing
+          const dupLeads = board.filter(l => dupeDistrictIds.has(l.id));
+          board = board.filter(l => !dupeDistrictIds.has(l.id));
+          setPruningReviewQueue(prev => {
+            const existingIds = new Set(prev.map(r => r.lead?.id).filter(Boolean));
+            const fresh = dupLeads.filter(l => !existingIds.has(l.id)).map(l => ({
+              lead: l,
+              reason: 'Duplicate district reference',
+              explanation: `This district/area appears to duplicate another item on the board. Multiple sources may reference the same redevelopment area.`,
+              keepHint: 'Prune if the existing district item already covers this area.',
+            }));
+            if (fresh.length > 0) setPruneReviewVisible(true);
+            return [...prev, ...fresh];
+          });
         }
       }
 
