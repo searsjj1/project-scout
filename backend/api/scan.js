@@ -695,9 +695,10 @@ function isWatchTitleAcceptable(title) {
     return { pass: false, reason: 'email_fragment' };
 
   // ── Block: standalone person names (First Last format) without project context ──
-  // "John Smith", "Mary Johnson" — but allow "Smith Block Building", "Johnson Library"
+  // "John Smith", "Mary Johnson" — but allow "Smith Block Building", "Johnson Library",
+  // and strategic area names like "Riverfront Triangle", "Grant Creek Crossing"
   if (/^[A-Z][a-z]+\s+[A-Z][a-z]+\s*$/.test(title.trim()) && title.split(/\s+/).length === 2 &&
-      !/\b(building|library|school|center|hall|facility|station|park|bridge|tower|plaza|court)\b/i.test(lo))
+      !/\b(building|library|school|center|hall|facility|station|park|bridge|tower|plaza|court|triangle|crossing|corridor|commons|block|mill|yard|junction|square|depot|gateway|development|project|redevelopment)\b/i.test(lo))
     return { pass: false, reason: 'person_name_only' };
 
   // ── Block: page/document chrome that leaked into title ──
@@ -978,7 +979,7 @@ function isWatchTitleAcceptable(title) {
   // ── Block: titles that are just a geographic name + "update" or "report" ──
   // "Helena Update", "Billings Report", "Flathead County Update"
   if (/^[A-Z][\w\s.'&\u2019]+\s+(update|report|overview|summary|profile|snapshot|brief|bulletin|newsletter)\s*$/i.test(title.trim()) &&
-      !/\b(renovation|construction|building|facility|design|project|rfq|rfp|development|bond|capital)\b/i.test(lo))
+      !/\b(renovation|construction|building|facility|design|project|rfq|rfp|development|bond|capital|crossing|triangle|corridor|commons|mill|yard|site|redevelopment)\b/i.test(lo))
     return { pass: false, reason: 'geographic_report_title' };
 
   // ── Block: "information about" / "overview of" / "guide to" filler titles ──
@@ -2607,6 +2608,84 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       continue;
     }
 
+    // ── v3.5: Lead specificity gate ──
+    // Catch items that pass basic noise/admin filters but are still too generic to be real leads.
+    // A surviving lead should identify a specific project, solicitation, site, or opportunity target.
+    const isNonSpecificLead = (() => {
+      // Company/firm/consultant names — not projects
+      if (/\b(architecture|architects?|engineering|engineers?|consulting|consultants?|design\s+(?:group|studio|firm|inc|llc|pllc))\b/i.test(titleLo) &&
+          !/\b(renovation|construction|replacement|upgrade|expansion|project|rfq|rfp|solicitation|facility|building|school|hospital)\b/i.test(titleLo)) return true;
+      // Organization + generic suffix only: "Missoula Economic Partnership", "Providence St. Patrick Hospital" as org mention
+      if (/\b(partnership|foundation|association|coalition|alliance|consortium|corporation|company|inc\b|llc\b|pllc\b|group\b)\s*$/i.test(titleLo.trim()) &&
+          !/\b(development|redevelopment|project|renovation|construction|facility|replacement|upgrade|expansion)\b/i.test(titleLo)) return true;
+      // Generic department/program names without project identity
+      if (/^(building\s+(&|and)\s+grounds?\s+maintenance|planning[,\s]+design[,\s]+(&|and)\s+construction|facilities?\s+(management|services?|operations?)|research\s+development)\s*$/i.test(titleLo.trim())) return true;
+      // Generic program/initiative/strategy text without a named project
+      if (/^(reducing|identifying|increasing|improving|ensuring|supporting|enhancing|maintaining|addressing)\s+/i.test(titleLo) &&
+          !/\b[A-Z][a-z]{2,}\s+(school|hospital|library|courthouse|station|center|building|facility|plant|hall|arena|stadium|campus|bridge|road)\b/.test(title || '')) return true;
+      // Address + phone number fragments
+      if (/\d+\s+\w+\s+(drive|street|avenue|road|way|blvd|boulevard)\b/i.test(titleLo) && /\(\d{3}\)\s*\d{3}[-.]?\d{4}/.test(titleLo)) return true;
+      // Bare address as title (number + street + city/state)
+      if (/^\d+\s+\w+\s+(dr|st|ave|rd|way|blvd|ln|ct|pl)\b.*\b(mt|id|wa|or)\b/i.test(titleLo) &&
+          !/\b(renovation|construction|project|replacement|upgrade|facility|building)\b/i.test(titleLo)) return true;
+      // Generic block grant / program without project scope
+      if (/^(community\s+development\s+block\s+grant|cdbg)\b/i.test(titleLo) &&
+          !/\b(renovation|construction|project|facility|building|school|hospital|replacement|upgrade|design)\b/i.test(ctxLo2.slice(0, 300))) return true;
+      // Generic "research" or "development" as standalone department/topic
+      if (/^(research\s+development|research\s+&\s+development|r\s*&\s*d)\s*$/i.test(titleLo.trim())) return true;
+      // Climate/sustainability policy without project
+      if (/\b(climate\s+change|carbon\s+(footprint|reduction|neutral)|greenhouse|sustainability\s+(plan|program|goal|initiative|strategy))\b/i.test(titleLo) &&
+          !/\b(renovation|construction|building|facility|project|replacement|upgrade|solar|wind|geothermal|energy\s+retrofit)\b/i.test(titleLo)) return true;
+      return false;
+    })();
+    if (isNonSpecificLead) {
+      log(`    ⊘ Non-specific lead (no clear project/site/opportunity identity): "${title.slice(0,60)}"`);
+      continue;
+    }
+
+    // ── v3.5: Lead object typing ──
+    // Positive classification: what valid lead type IS this?
+    // Only valid types survive. Everything else is blocked.
+    const classifyLeadObject = (t, ctx, lc) => {
+      const tlo = (t || '').toLowerCase();
+      const clo = (ctx || '').toLowerCase().slice(0, 500);
+      // 1. Solicitation — has RFQ/RFP/SOQ/BID/ITB language
+      if (/\b(rfq|rfp|soq|bid|itb|invitation\s+to\s+bid|request\s+for\s+(qualifications?|proposals?)|solicitation)\b/i.test(tlo)) return 'solicitation';
+      if (lc === 'active_solicitation') return 'solicitation';
+      // 2. Named project — has a project action word + named subject OR is from a container child
+      if (/\b(renovation|construction|replacement|upgrade|modernization|expansion|addition|remodel|retrofit|restoration|demolition|rehabilitation|repair|reroof|reroofing|improvements?)\b/i.test(tlo)) return 'project';
+      if (extractionPath === 'container_child') return 'project';
+      // 3. Strategic district — URD/TIF/TEDD/redevelopment/urban renewal
+      if (/\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(tlo)) return 'district';
+      if (lc === 'strategic_watch') return 'district';
+      // 4. Named site / opportunity area — has a place-type word + proper name
+      if (/\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|depot|development\s+park|log\s+yard|interchange|gateway|business\s+park|industrial\s+park|catalyst\s+site|opportunity\s+(site|zone|area))\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t)) return 'site';
+      // 5. Named facility with identifiable building type
+      if (/\b(school|hospital|library|courthouse|fire\s+station|police\s+station|terminal|community\s+center|recreation\s+center|treatment\s+plant|city\s+hall|town\s+hall|armory|auditorium|gymnasium|stadium|arena|museum|dormitory|laboratory|wellness\s+center|storage\s+building|operations\s+facility|maintenance\s+facility)\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t)) return 'project';
+      // 6. Named building/facility with proper name (e.g., "Smith Block Building", "Flathead Lake Station")
+      if (/\b(building|facility|station|center|hall|plant|tower)\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t) && t.split(/\s+/).length >= 2) return 'project';
+      // 7. Capital/CIP/budget item with specific scope language in context
+      if (/\b(capital\s+(improvement|project)|cip|deferred\s+maintenance|major\s+maintenance|facility\s+(assessment|condition)|bond\s+(program|measure))\b/i.test(tlo) &&
+          /\b(building|facility|school|hospital|library|courthouse|station|center|plant|campus)\b/i.test(clo)) return 'project';
+      // 8. Development/master plan with named subject
+      if (/\b(development|master\s+plan|campus\s+plan|facility\s+plan|long.range\s+plan)\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t) &&
+          !/^(community\s+development|economic\s+development|staff\s+development|workforce\s+development)\s*$/i.test(tlo.trim())) return 'project';
+      // 9. Equipment/MEP with named facility
+      if (/\b(elevator|boiler|hvac|chiller|fire\s+alarm|generator|roof|window|mechanical|electrical|plumbing)\b/i.test(tlo) &&
+          /\b(replacement|upgrade|modernization|repair|install)\b/i.test(tlo)) return 'project';
+      // 10. "[Proper Name] Project" — explicit project word with proper name
+      if (/\bproject\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t) && t.split(/\s+/).length >= 2 &&
+          !/^(community|economic|staff|workforce|software|research)\s+/i.test(tlo)) return 'project';
+      // 11. Named property/site development (from econ-dev sources)
+      if (/\b(property\s+(development|redevelopment)|site\s+(development|redevelopment))\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t)) return 'site';
+      // 12. "[Proper Name] Development" with proper name (not generic "Community Development")
+      if (/\bdevelopment\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t) && t.split(/\s+/).length >= 2 &&
+          !/^(community|economic|staff|workforce|software|business|professional|organizational|curriculum|resource)\s+development\s*$/i.test(tlo.trim())) return 'site';
+      // Unclassifiable — no valid lead type
+      return null;
+    };
+    // Lead object typing moved below — needs leadClass which is declared at classifyActiveWatch
+
     // ── Already-claimed suppression ──
     // Block projects that already have a designer, contractor, are under construction, or completed.
     // Pass both narrow context (sentence) and wide context (±800 chars) so claimed-team info
@@ -2678,6 +2757,14 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       }
     }
     log(`    📋 classify: "${title.slice(0,50)}" → ${status} (${classifyReason}) | match: "${matchText.slice(0,80).replace(/\n/g,' ')}"`);
+
+    // ── v3.5: Lead object typing — positive classification gate ──
+    // Now that leadClass is known, classify the lead object type.
+    const leadObjectType = classifyLeadObject(title, fullContext, leadClass);
+    if (!leadObjectType) {
+      log(`    ⊘ No valid lead object type: "${title.slice(0,60)}" — suppressed (not solicitation/project/site/district)`);
+      continue;
+    }
 
     // Step 13: Watch-specific title quality gate
     // Watch leads must identify one specific future project — not a generic heading
@@ -3070,7 +3157,8 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       status, leadClass, leadOrigin: 'live',
       source_document_type: docType.isStrategy ? docType.documentType : 'standard',
       watchCategory, projectStatus, extractionPath: extractionPath || 'pattern',
-      containerChild: extractionPath === 'container_child' || false, // v3.5: flag for container-decomposed leads
+      leadObjectType: leadObjectType || 'unknown', // v3.5: solicitation/project/site/district
+      containerChild: extractionPath === 'container_child' || false,
       sourceName: src.name, sourceUrl: src.url, sourceId: src.id,
       evidenceLinks: [...new Set([evidenceUrl, src.url])],
       evidenceSourceLinks,

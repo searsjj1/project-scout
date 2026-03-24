@@ -4841,6 +4841,7 @@ function translatePruneReason(reason, lead) {
   if (r.includes('already_claimed_completed')) return { label: 'Project appears completed', explanation: 'Source text references ribbon-cutting, completion, or grand opening for this project.', keepHint: 'Keep if a follow-on project or new phase is expected.' };
   // Noise/generic
   if (r === 'noise_title') return { label: 'Non-project content', explanation: 'This title matches patterns typical of administrative pages, governance documents, or non-project content rather than a real A&E opportunity.', keepHint: 'Keep if the item actually represents a real facility, capital, or design project.' };
+  if (r === 'no_lead_object_type') return { label: 'No specific project identity', explanation: 'This item could not be identified as a specific project, solicitation, named site, or strategic district. It may be a generic program, department, initiative, or topic heading rather than a real lead.', keepHint: 'Keep if this actually represents a specific project, facility, or opportunity target with real A&E scope.' };
   if (r === 'generic_weak_fit') return { label: 'Weak service fit', explanation: 'This lead scored below typical thresholds for A&E service alignment. The market sector and project type are too generic to be confident.', keepHint: 'Keep if you know this is a real project with design scope.' };
   if (r === 'below_relevance_threshold') return { label: 'Low relevance score', explanation: 'This lead scored below the minimum relevance threshold, suggesting weak source evidence for a real A&E opportunity.', keepHint: 'Keep if you have additional context that supports this as a real project.' };
   if (r === 'infrastructure_no_building') return { label: 'Infrastructure only — no building scope', explanation: 'This appears to be pure infrastructure work (roads, utilities, civil) without a building or facility design component.', keepHint: 'Keep if the project includes a treatment plant, pump station, or other facility design.' };
@@ -5126,6 +5127,20 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
     if (/^[\w\s&'.,()]+\s*[–—-]\s*(bid\s+solicitations?|capital\s+improvement|current\s+(bids?|projects?|solicitations?)|public\s+(works?|bids?))\s*$/i.test(lo)) return true;
     // Service description fragments
     if (/^(we\s+provide|our\s+mission|about\s+us|who\s+we\s+are|what\s+we\s+do|our\s+services)\b/i.test(lo.trim())) return true;
+    // v3.5: Non-specific leads — company names, department names, generic programs
+    // Architecture/design/consulting firm names as leads
+    if (/\b(architecture|architects?|engineering\s+firm|design\s+(group|studio|firm|inc|llc))\b/i.test(lo) &&
+        !/\b(renovation|construction|replacement|upgrade|project|rfq|rfp|facility|building|school|hospital)\b/i.test(lo)) return true;
+    // Generic department/program names
+    if (/^(building\s+(&|and)\s+grounds?\s+maintenance|planning[,\s]+(design[,\s]+)?(&|and)\s+construction|facilities?\s+(management|services?|operations?)|research\s+development)\s*$/i.test(lo.trim())) return true;
+    // Address + phone fragments
+    if (/\d+\s+\w+\s+(drive|street|avenue|road|way|blvd)\b/i.test(lo) && /\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/.test(lo)) return true;
+    // Generic gerund titles without named project (Reducing X, Identifying Y, Improving Z)
+    if (/^(reducing|identifying|increasing|improving|ensuring|supporting|enhancing|maintaining|addressing)\s+/i.test(lo) &&
+        !/\b(school|hospital|library|courthouse|station|center|building|facility|plant|hall|arena|campus)\b/i.test(lo)) return true;
+    // Standalone organization/partnership/company suffix
+    if (/\b(partnership|foundation|association|coalition|alliance|consortium|inc|llc|pllc)\s*$/i.test(lo.trim()) &&
+        !/\b(development|redevelopment|project|renovation|construction|facility|replacement|upgrade)\b/i.test(lo)) return true;
     // ── v26: Already-claimed/awarded project indicators ──
     // Project already awarded to / designed by / built by / under construction by
     if (/\b(awarded\s+to|designed\s+by|built\s+by|constructed\s+by|contractor\s+(?:is|was|selected)|architect\s+of\s+record)\b/i.test(lo) &&
@@ -5336,6 +5351,24 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
                !/\btourism\b/i.test(lo)) // Tourism BIDs already caught by isNoiseTitle
         reason = 'watch_bid_no_building';
     }
+    // 5c. v3.5: Lead object type check — positive classification
+    // If a Watch lead can't be classified as a valid lead object type, route to review.
+    if (!reason && isWatch && !lead.leadObjectType) {
+      const tlo = (lead.title || '').toLowerCase();
+      const hasProjectSignal = /\b(renovation|construction|replacement|upgrade|modernization|expansion|addition|remodel|retrofit|restoration|rehabilitation|repair|reroof|improvements?|rfq|rfp|soq|bid|solicitation)\b/i.test(tlo);
+      const hasNamedFacility = /\b(school|hospital|library|courthouse|fire\s+station|police|terminal|center|hall|plant|campus|building|facility|station|arena|stadium|museum)\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(lead.title || '');
+      const hasStrategicArea = /\b(urd|tif|tedd|urban\s+renewal|redevelopment|crossing|triangle|corridor|commons|block|mill|yard|development\s+park)\b/i.test(tlo);
+      const hasNamedSite = /\b(crossing|triangle|corridor|commons|block|mill|yard|plaza|square|junction|depot|gateway|park)\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(lead.title || '');
+      const hasMEP = /\b(elevator|boiler|hvac|chiller|fire\s+alarm|generator|roof|mechanical|electrical)\b/i.test(tlo) && /\b(replacement|upgrade|modernization|repair)\b/i.test(tlo);
+      // v3.5: "X Project" with proper name = valid project
+      const hasNamedProject = /\bproject\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(lead.title || '') && (lead.title || '').split(/\s+/).length >= 2 && !/^(community|economic|staff|workforce|software|research)\s+/i.test(tlo);
+      // v3.5: "X Development" / "X Property Development" with proper name
+      const hasNamedDev = /\b(development|property\s+development|site\s+development)\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(lead.title || '') && !/^(community|economic|staff|workforce|software|business|professional)\s+development\s*$/i.test(tlo.trim());
+      if (!hasProjectSignal && !hasNamedFacility && !hasStrategicArea && !hasNamedSite && !hasMEP && !hasNamedProject && !hasNamedDev) {
+        reason = 'no_lead_object_type';
+      }
+    }
+
     // 5b. Already-claimed: description/context indicates project team assembled, completed, or under construction
     if (!reason) {
       const titleLo = (lead.title || '').toLowerCase();
@@ -5408,6 +5441,9 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
         'already_claimed_project_team_assembled',
         'already_claimed_completed_prefix',
         'civil_commodity_no_building',
+        // v3.5: Non-specific items are clearly not leads — auto-remove, don't clog review queue
+        'noise_title',
+        'no_lead_object_type',
       ]);
 
       if (isStrategicWatch && !reason.startsWith('already_claimed_')) {
@@ -5823,7 +5859,7 @@ export default function ProjectScout() {
     if (sharedStoreStatus === 'checking') return; // Still checking shared store health
     if (sharedStoreStatus === 'connected' && !sharedSyncReady.current) return; // Connected but sync not done yet
     const cleanupVersion = localStorage.getItem('ps_board_cleanup_version');
-    const CURRENT_CLEANUP_VERSION = '2026-03-23-v35'; // v35: Stale container/listing parent cleanup + child title normalization
+    const CURRENT_CLEANUP_VERSION = '2026-03-23-v38'; // v38: Stored survivor cleanup (noise+no_type → auto-remove) + strategic title rescue
     if (cleanupVersion === CURRENT_CLEANUP_VERSION) { setBoardCleanupDone(true); return; }
 
     // Apply quality gates to all existing leads
