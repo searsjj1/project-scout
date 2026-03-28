@@ -16,7 +16,126 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v3.5-20260323';
+const SCAN_BUILD_ID = 'scan-v4.0-20260324';
+
+// ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
+// Each source has a profile that controls how the scan engine reads it.
+// Profile types: budget, agenda, procurement, redevelopment, media, employer, contractor, institutional
+const SOURCE_PROFILES = {
+  budget: {
+    container_behavior: 'container',
+    max_child_fetches: 5,
+    max_leads: 10,
+    prefer_child_types: ['capital_document', 'document_pdf', 'project_detail'],
+    allowed_object_types: ['solicitation', 'project', 'district', 'site', 'development_potential'],
+    blocked_object_types: ['department', 'program', 'topic', 'organization'],
+    dashboard_lane: 'active_leads',
+    ignore_patterns: ['general fund', 'operating budget', 'personnel', 'staffing', 'payroll', 'insurance', 'benefits', 'salary'],
+  },
+  agenda: {
+    container_behavior: 'container',
+    max_child_fetches: 5,
+    max_leads: 8,
+    prefer_child_types: ['meeting_document', 'document_pdf', 'board_packet'],
+    allowed_object_types: ['solicitation', 'project', 'district', 'site', 'news_item'],
+    blocked_object_types: ['department', 'program', 'topic', 'organization'],
+    dashboard_lane: 'active_leads',
+    ignore_patterns: ['consent agenda', 'roll call', 'pledge of allegiance', 'approval of minutes', 'public comment period', 'adjournment', 'proclamation'],
+  },
+  procurement: {
+    container_behavior: 'container',
+    max_child_fetches: 6,
+    max_leads: 12,
+    prefer_child_types: ['solicitation_detail', 'document_pdf', 'project_detail'],
+    allowed_object_types: ['solicitation', 'project'],
+    blocked_object_types: ['department', 'program', 'topic', 'organization'],
+    dashboard_lane: 'active_leads',
+    ignore_patterns: ['fuel bid', 'chip seal', 'mowing', 'snow removal', 'janitorial', 'custodial', 'uniform', 'vehicle purchase', 'parts list'],
+  },
+  redevelopment: {
+    container_behavior: 'hybrid',
+    max_child_fetches: 4,
+    max_leads: 12,
+    prefer_child_types: ['project_detail', 'document_pdf', 'meeting_document'],
+    allowed_object_types: ['district', 'site', 'development_potential', 'project'],
+    blocked_object_types: ['department', 'topic', 'organization'],
+    dashboard_lane: 'development_potentials',
+    ignore_patterns: ['general policy', 'mission statement', 'about us', 'contact us'],
+  },
+  media: {
+    container_behavior: 'direct',
+    max_child_fetches: 0,
+    max_leads: 5,
+    prefer_child_types: [],
+    allowed_object_types: ['news_item', 'project'],
+    blocked_object_types: ['department', 'program', 'topic'],
+    dashboard_lane: 'news',
+    ignore_patterns: ['sports', 'entertainment', 'obituary', 'opinion', 'letter to the editor', 'classified', 'horoscope', 'comics'],
+  },
+  employer: {
+    container_behavior: 'direct',
+    max_child_fetches: 2,
+    max_leads: 5,
+    prefer_child_types: ['project_detail'],
+    allowed_object_types: ['news_item', 'project', 'development_potential'],
+    blocked_object_types: ['department', 'program', 'topic'],
+    dashboard_lane: 'news',
+    ignore_patterns: ['job posting', 'career', 'hiring', 'employment', 'benefits', 'hr', 'apply now'],
+  },
+  contractor: {
+    container_behavior: 'direct',
+    max_child_fetches: 2,
+    max_leads: 5,
+    prefer_child_types: ['project_detail'],
+    allowed_object_types: ['news_item', 'project'],
+    blocked_object_types: ['department', 'program', 'topic', 'organization'],
+    dashboard_lane: 'news',
+    ignore_patterns: ['job posting', 'career', 'hiring', 'about us', 'mission', 'values', 'safety record'],
+  },
+  institutional: {
+    container_behavior: 'hybrid',
+    max_child_fetches: 3,
+    max_leads: 8,
+    prefer_child_types: ['capital_document', 'project_detail', 'document_pdf'],
+    allowed_object_types: ['project', 'development_potential'],
+    blocked_object_types: ['department', 'program', 'topic', 'organization'],
+    dashboard_lane: 'active_leads',
+    ignore_patterns: ['academic program', 'student services', 'admissions', 'tuition', 'course catalog', 'financial aid'],
+  },
+};
+
+function getSourceProfile(src) {
+  // Check for explicit profile_type on the source
+  if (src.source_profile?.profile_type && SOURCE_PROFILES[src.source_profile.profile_type]) {
+    return { ...SOURCE_PROFILES[src.source_profile.profile_type], ...src.source_profile };
+  }
+  // Infer from source_family and name
+  const family = src.source_family || '';
+  const name = (src.source_name || src.name || '').toLowerCase();
+  const url = (src.source_url || src.url || '').toLowerCase();
+  if (/SF-01/.test(family) || /procurement|bid|rfq|rfp/i.test(name)) return SOURCE_PROFILES.procurement;
+  if (/SF-02/.test(family) || /agenda|meeting|minutes|commission/i.test(name)) return SOURCE_PROFILES.agenda;
+  if (/SF-08/.test(family) || /budget|cip|capital|opengov/i.test(name) || /opengov\.com/.test(url)) return SOURCE_PROFILES.budget;
+  if (/SF-09/.test(family) || /redevelopment|mra|urban renewal|development (authority|partnership)/i.test(name)) return SOURCE_PROFILES.redevelopment;
+  if (/SF-07/.test(family) || /facilit|campus|university|college|school/i.test(name)) return SOURCE_PROFILES.institutional;
+  if (/news|missoulian|current|kpax|media/i.test(name) || /missoulian\.com|missoulacurrent|kpax/i.test(url)) return SOURCE_PROFILES.media;
+  if (/contractor|construction co|dac|quality|jackson|martel|langlas/i.test(name)) return SOURCE_PROFILES.contractor;
+  if (/employer|hospital|bank|providence|community medical/i.test(name)) return SOURCE_PROFILES.employer;
+  return SOURCE_PROFILES.institutional; // default
+}
+
+function profileMatchesIgnore(profile, text) {
+  if (!profile?.ignore_patterns?.length || !text) return false;
+  const lo = text.toLowerCase();
+  return profile.ignore_patterns.some(pat => lo.includes(pat));
+}
+
+function profileAllowsObjectType(profile, objectType) {
+  if (!profile || !objectType) return true;
+  if (profile.blocked_object_types?.includes(objectType)) return false;
+  if (profile.allowed_object_types?.length > 0) return profile.allowed_object_types.includes(objectType);
+  return true;
+}
 
 // ── PDF text extraction (lazy-loaded) ───────────────────────
 // Uses unpdf — a serverless-optimized PDF.js wrapper with zero native dependencies.
@@ -324,7 +443,17 @@ function extractChildLinks(rawHtml, sourceUrl) {
       relevanceHint = 10;
     }
     // Meeting minutes/agendas with dates
-    else if (/\b(minutes|agenda|meeting)\b/.test(lo) && /\d{1,2}[\/-]\d{1,2}|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d/i.test(lo + ' ' + hrefLo)) {
+    else if (/\b(minutes|agenda|meeting|packet)\b/.test(lo) && /\d{1,2}[\/-]\d{1,2}|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d/i.test(lo + ' ' + hrefLo)) {
+      linkType = 'meeting_document';
+      relevanceHint = 7;
+    }
+    // Meeting detail/action pages (CivicClerk, Granicus, Legistar)
+    else if (/\b(agenda|packet|meeting|minutes)\b/i.test(lo) && /\b(detail|view|download|open)\b/i.test(lo + ' ' + hrefLo)) {
+      linkType = 'meeting_document';
+      relevanceHint = 6;
+    }
+    // Staff reports, memos, supporting documents
+    else if (/\b(staff\s+report|memo|memorandum|supporting\s+document|backup\s+material|supplemental)\b/i.test(lo)) {
       linkType = 'meeting_document';
       relevanceHint = 7;
     }
@@ -359,6 +488,17 @@ function extractChildLinks(rawHtml, sourceUrl) {
     else if (/\b(pdf|download|document)\b/i.test(lo) &&
              /\b(DocumentCenter|ViewFile|AgendaCenter|ArchiveCenter)\b/i.test(hrefLo)) {
       linkType = 'document_pdf';
+      relevanceHint = 7;
+    }
+    // BoardDocs portal — used by school districts and municipal boards
+    else if (/boarddocs\.com/i.test(hrefLo)) {
+      linkType = 'meeting_document';
+      relevanceHint = 8;
+    }
+    // Press release / notice items with facility/project/procurement keywords
+    else if (/\b(announcement|notice|release|news)\b/i.test(lo + ' ' + hrefLo) &&
+             /\b(rfq|rfp|rfb|bid|project|terminal|expansion|construction|renovation|facility|capital)\b/i.test(lo)) {
+      linkType = 'project_detail';
       relevanceHint = 7;
     }
 
@@ -1451,6 +1591,14 @@ function isListingPage(content, childLinks) {
   const solMentions = lo.match(/\b(rfq|rfp|soq|bid)\s*[-–—:]\s*[a-z]/gi) || [];
   if (solMentions.length >= 3) return true;
 
+  // v3.5: Meeting/agenda portals with multiple meeting links
+  if (childLinks && childLinks.length > 0) {
+    const meetingLinks = childLinks.filter(cl =>
+      cl.linkType === 'meeting_document' || /\b(agenda|minutes|packet|meeting)\b/i.test(cl.anchorText)
+    );
+    if (meetingLinks.length >= 3) return true;
+  }
+
   // Page title/heading patterns that indicate a listing/portal
   if (/\b(bid solicitations?|current (bids?|solicitations?|rfps?|rfqs?)|open (bids?|solicitations?))\b/i.test(lo) &&
       (lo.match(/\b(rfq|rfp|bid|soq|solicitation)\b/gi) || []).length >= 2) return true;
@@ -2127,15 +2275,20 @@ function generateAIAssessment(leadClass, market, projectType, scores, serviceFit
 }
 
 // ── Extract leads from real fetched content ─────────────────
-async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () => {}, taxonomy = [], rawHtml = '') {
+async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () => {}, taxonomy = [], rawHtml = '', sourceProfile = null) {
   if (!content || content.length < 50) return [];
 
+  // ── V4: Source profile — controls container behavior, child fetches, object types, ignores ──
+  const profile = sourceProfile || getSourceProfile(src);
+  const profileType = profile.container_behavior || 'hybrid';
+  log(`    📋 Source profile: ${profile.profile_type || 'inferred'} (container: ${profileType}, max children: ${profile.max_child_fetches || '?'}, lane: ${profile.dashboard_lane || '?'})`);
+
   // ── Step 0: Listing page detection ────────────────────────
-  // If the page contains many distinct solicitations/projects, flag it.
-  // On listing pages, we apply stricter admission for each candidate.
-  const listingPage = isListingPage(content, childLinks);
+  // Profile can force container behavior
+  const isProfileContainer = profileType === 'container';
+  const listingPage = isProfileContainer || isListingPage(content, childLinks);
   if (listingPage) {
-    log(`    ⚡ Listing page detected — will decompose into child solicitations`);
+    log(`    ⚡ ${isProfileContainer ? 'Profile-driven' : 'Auto-detected'} container — will decompose into child artifacts`);
   } else {
     // v3.5: Diagnostic — show why listing detection failed
     const solChildCount = (childLinks || []).filter(cl =>
@@ -2155,11 +2308,13 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
   // not "City of Coeur d'Alene — Capital Improvement".
   const containerChildCandidates = [];
   if (listingPage && childLinks && childLinks.length > 0) {
+    const preferredChildTypes = new Set(profile.prefer_child_types || []);
     const solicitationLinks = childLinks.filter(cl =>
       cl.linkType === 'solicitation_detail' || cl.linkType === 'project_detail' ||
-      (cl.linkType === 'document_pdf' && /\b(rfq|rfp|soq|bid|solicitation|engineering|architect|design)\b/i.test(cl.anchorText))
+      (cl.linkType === 'document_pdf' && /\b(rfq|rfp|soq|bid|solicitation|engineering|architect|design)\b/i.test(cl.anchorText)) ||
+      (preferredChildTypes.size > 0 && preferredChildTypes.has(cl.linkType) && cl.relevanceHint >= 6)
     );
-    log(`    📋 Container decomposition: ${solicitationLinks.length} child solicitation links found`);
+    log(`    📋 Container decomposition: ${solicitationLinks.length} child solicitation links found (preferred types: ${[...preferredChildTypes].join(', ') || 'none'})`);
     for (const cl of solicitationLinks.slice(0, 15)) {
       // v3.5: Apply cleanTitle to child anchor text before validation.
       // Raw anchor texts often have trailing periods, leading whitespace, or
@@ -2252,6 +2407,11 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     // District improvement items: "[District Name] improvement" or "[Area Name] infrastructure"
     /(?:[A-Z][\w\s]{3,30})\s+(?:district|URD|corridor|downtown|midtown)\s+(?:improvement|infrastructure|development|project|investment)[^.]{5,80}/gi,
 
+    // ── v3.5: OpenGov budget book fund-line patterns ──
+    // "NNNN - FUND NAME" format common in OpenGov budget book data
+    // Only extract strategic/capital fund lines, not general revenue/admin
+    /\b\d{4}\s*-\s*((?:BONNER|WYE|DEVELOPMENT PARK|CAPITAL|DETENTION|LIBRARY|FAIR|PARTNERSHIP HEALTH|TECHNOLOGY)[A-Z &/()-]*(?:TAX INCREMENT|TEDD|DISTRICT|IMPROVEMENT|FUND|FACILITY|CENTER|PLANT)?)\b/g,
+
     // ── v32: Agenda / minutes / staff-report strategic-watch patterns ──
     // "Discussion of [Named Area/Project]" — common in meeting agendas
     /(?:discussion|update|presentation|report|review|consideration)\s+(?:of|on|regarding)\s+(?:the\s+)?([A-Z][\w\s]{5,60}(?:project|development|crossing|triangle|corridor|commons|block|mill|yard|park|district|plan|site|phase|area))\b/gi,
@@ -2314,7 +2474,8 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
 
   // v31: Also detect budget/CIP source pages for enhanced HTML extraction
   const isBudgetSource = /SF-08|Capital Planning/i.test(src.source_family || src.category || '') ||
-    /\b(budget|cip|capital (improvement|project|plan)|facilities (plan|assessment)|deferred maintenance|major maintenance)\b/i.test(src.name || '');
+    /\b(budget|cip|capital (improvement|project|plan)|facilities (plan|assessment)|deferred maintenance|major maintenance|opengov)\b/i.test(src.name || '') ||
+    /opengov\.com/i.test(src.url || src.source_url || '');
 
   if ((isProjectPage || isBudgetSource) && rawHtml) {
     const stripHtml = (s) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&nbsp;/g,' ').replace(/&#?\w+;/g,' ').replace(/\s+/g, ' ').trim();
@@ -2497,13 +2658,12 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
   // ── Step 3: Build lead records from valid candidates
   const leads = [];
   const now = new Date().toISOString();
-  // v31: Budget/CIP sources get more child fetches since they link to multiple project detail pages/PDFs
-  const MAX_CHILD_FETCHES_PER_SOURCE = isBudgetSource ? 4 : 2;
+  // V4: Use source profile for child fetch budget and max leads
+  const MAX_CHILD_FETCHES_PER_SOURCE = profile.max_child_fetches ?? 2;
   let childFetchCount = 0;
-
-  // v32: Redevelopment/district sources may contain multiple named subprojects — raise cap
+  const maxLeadsPerSource = profile.max_leads ?? 8;
+  const isMeetingSource = /SF-02|Agenda|Meeting|Minutes|Commission/i.test(src.source_family || src.category || src.name || '');
   const isDistrictSource = /redevelopment|urban renewal|tif|tedd|urd|major.?project|development.?(district|park|opportunity)/i.test(src.name || src.category || '');
-  const maxLeadsPerSource = isDistrictSource ? 12 : (isBudgetSource ? 10 : 8);
 
   for (const cand of candidates) {
     if (leads.length >= maxLeadsPerSource) break;
@@ -2538,8 +2698,13 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
 
     // On listing pages, require stronger project-specific evidence
     if (listingPage) {
-      // Step 11: Listing page gate requires project-specific title (not just caps + project word)
-      if (!isProjectSpecificTitle(title)) {
+      // Agenda-profile sources: allow meeting_document / board_packet child candidates through
+      // without the project-specific title gate — child enrichment will extract the real content.
+      const isMeetingDocChild = (cand.childLink?.linkType === 'meeting_document' || cand.childLink?.linkType === 'board_packet');
+      const isAgendaSource = profile.profile_type === 'agenda';
+      if (isMeetingDocChild && isAgendaSource) {
+        log(`    📋 Meeting document child (${cand.childLink.linkType}) — deferring title quality to child enrichment`);
+      } else if (!isProjectSpecificTitle(title)) {
         log(`    ⊘ Listing page — not project-specific: "${title}"`);
         continue;
       }
@@ -2657,6 +2822,7 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       if (extractionPath === 'container_child') return 'project';
       // 3. Strategic district — URD/TIF/TEDD/redevelopment/urban renewal
       if (/\b(urd|tif|tedd|urban\s+renewal|tax\s+increment|redevelopment\s+(area|district|zone|project))\b/i.test(tlo)) return 'district';
+      if (/\b(millsite|log\s+yard|development\s+park)\s+(tax\s+increment|tedd|district|non.incremnt)/i.test(tlo)) return 'district';
       if (lc === 'strategic_watch') return 'district';
       // 4. Named site / opportunity area — has a place-type word + proper name
       if (/\b(crossing|triangle|corridor|commons|block|mill|yard|junction|plaza|square|depot|development\s+park|log\s+yard|interchange|gateway|business\s+park|industrial\s+park|catalyst\s+site|opportunity\s+(site|zone|area))\b/i.test(tlo) && /[A-Z][a-z]{2,}/.test(t)) return 'site';
@@ -2763,6 +2929,18 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     const leadObjectType = classifyLeadObject(title, fullContext, leadClass);
     if (!leadObjectType) {
       log(`    ⊘ No valid lead object type: "${title.slice(0,60)}" — suppressed (not solicitation/project/site/district)`);
+      continue;
+    }
+
+    // V4: Profile-driven object type filter
+    if (!profileAllowsObjectType(profile, leadObjectType)) {
+      log(`    ⊘ Profile blocks object type "${leadObjectType}" for ${profile.profile_type || 'unknown'} source: "${title.slice(0,60)}"`);
+      continue;
+    }
+
+    // V4: Profile-driven ignore pattern check
+    if (profileMatchesIgnore(profile, title) || profileMatchesIgnore(profile, matchText)) {
+      log(`    ⊘ Profile ignore pattern matched: "${title.slice(0,60)}" (${profile.profile_type || 'unknown'} source)`);
       continue;
     }
 
@@ -3157,7 +3335,14 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       status, leadClass, leadOrigin: 'live',
       source_document_type: docType.isStrategy ? docType.documentType : 'standard',
       watchCategory, projectStatus, extractionPath: extractionPath || 'pattern',
-      leadObjectType: leadObjectType || 'unknown', // v3.5: solicitation/project/site/district
+      leadObjectType: leadObjectType || 'unknown',
+      // V4: Dashboard lane routing — profile takes priority, then object-type default
+      dashboardLane: profile.dashboard_lane || (
+        leadObjectType === 'solicitation' || leadObjectType === 'project' ? 'active_leads'
+        : leadObjectType === 'district' || leadObjectType === 'site' || leadObjectType === 'development_potential' ? 'development_potentials'
+        : leadObjectType === 'news_item' ? 'news'
+        : 'active_leads'
+      ),
       containerChild: extractionPath === 'container_child' || false,
       sourceName: src.name, sourceUrl: src.url, sourceId: src.id,
       evidenceLinks: [...new Set([evidenceUrl, src.url])],
@@ -3287,7 +3472,8 @@ export default async function handler(req, res) {
         if (kw.pass) {
           const childLinks = extractChildLinks(f.rawHtml, source.url);
           log(`Found ${childLinks.length} child document links`);
-          leads = await extractLeads(f.content, source, kw.kw, body.focusPoints||[], body.targetOrgs||[], childLinks, log, body.taxonomy||[], f.rawHtml||'');
+          const srcProfile = getSourceProfile(source);
+          leads = await extractLeads(f.content, source, kw.kw, body.focusPoints||[], body.targetOrgs||[], childLinks, log, body.taxonomy||[], f.rawHtml||'', srcProfile);
           log(`Extracted ${leads.length} lead(s)`);
         } else {
           log('No leads — keyword threshold not met');
@@ -4004,7 +4190,8 @@ export default async function handler(req, res) {
       const childLinks = extractChildLinks(f.rawHtml, src.url);
       if (childLinks.length > 0) log(`  → ${childLinks.length} child document links found`);
 
-      const cands = await extractLeads(f.content, src, kw, focusPoints||[], targetOrgs||[], childLinks, log, taxonomy||[], f.rawHtml||'');
+      const srcProfile = getSourceProfile(src);
+      const cands = await extractLeads(f.content, src, kw, focusPoints||[], targetOrgs||[], childLinks, log, taxonomy||[], f.rawHtml||'', srcProfile);
       log(`  → ${cands.length} candidate(s)`);
 
       for (const c of cands) {
