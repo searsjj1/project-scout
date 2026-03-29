@@ -33,6 +33,10 @@ export function setProposedEntities(data){ return setTable(KEYS.PROPOSED_ENTITIE
 export function getLeads()           { return getTable(KEYS.LEADS); }
 export function getOwnerProjects()   { return getTable(KEYS.OWNER_PROJECTS); }
 export function getIntake()          { return getTable(KEYS.INTAKE); }
+export function getTaxonomy()        { return getTable(KEYS.TAXONOMY); }
+export function setTaxonomy(data)    { return setTable(KEYS.TAXONOMY, data); }
+export function getClients()         { return getTable(KEYS.CLIENTS); }
+export function setClients(data)     { return setTable(KEYS.CLIENTS, data); }
 export function getSettings()        { return storageGet(KEYS.SETTINGS) || {}; }
 export function setSettings(s)       { return storageSet(KEYS.SETTINGS, s); }
 export function getMigration()       { return storageGet(KEYS.MIGRATION); }

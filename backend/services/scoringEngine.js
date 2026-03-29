@@ -72,9 +72,10 @@ const PRIORITY_WEIGHT = { critical: 1.3, high: 1.15, medium: 1.0, low: 0.85 };
  * @param {Array}  focusPoints - All active focus points
  * @param {Array}  targetOrgs  - All active target organizations
  * @param {Object} settings    - App settings
- * @returns {Object} { relevanceScore, pursuitScore, sourceConfidenceScore, matchedKeywords, matchedFocusPoints, matchedTargetOrgs, confidenceNotes, aiReasonForAddition }
+ * @param {Array}  [taxonomy]  - Optional: editable taxonomy items from ps_taxonomy
+ * @returns {Object} { relevanceScore, pursuitScore, sourceConfidenceScore, matchedKeywords, matchedFocusPoints, matchedTargetOrgs, confidenceNotes, aiReasonForAddition, taxonomyMatches }
  */
-export function scoreLead(candidate, source, focusPoints, targetOrgs, settings) {
+export function scoreLead(candidate, source, focusPoints, targetOrgs, settings, taxonomy) {
   const text = `${candidate.title || ''} ${candidate.description || ''} ${candidate.sourceContent || ''}`.toLowerCase();
   
   // ─── 1. Keyword Signal Score (0-30 pts of relevance) ────────
@@ -183,18 +184,81 @@ export function scoreLead(candidate, source, focusPoints, targetOrgs, settings) 
   if (hasBudget) notes.push('Budget information present');
   if (hasTimeline) notes.push('Timeline information present');
 
+  // ─── 6. Taxonomy-driven adjustments (additive, optional) ────
+  // When taxonomy is provided, apply service-fit, market, noise,
+  // and pursuit adjustments. All existing scoring above is preserved.
+  const taxonomyMatches = [];
+  let taxonomyAdjustment = 0;
+  let noiseAdjustment = 0;
+
+  if (taxonomy && Array.isArray(taxonomy) && taxonomy.length > 0) {
+    const active = taxonomy.filter(t => t.status === 'active');
+
+    for (const item of active) {
+      // Check include keywords
+      const includeHits = item.include_keywords.filter(kw => text.includes(kw.toLowerCase()));
+      if (includeHits.length === 0) continue;
+
+      // Check exclude keywords — if any match, skip this taxonomy item
+      const excludeHit = item.exclude_keywords.some(kw => text.includes(kw.toLowerCase()));
+      if (excludeHit) continue;
+
+      taxonomyMatches.push({
+        taxonomy_id: item.taxonomy_id,
+        group: item.taxonomy_group,
+        label: item.label,
+        fit_mode: item.fit_mode,
+        matched_keywords: includeHits,
+      });
+
+      // Apply fit-mode adjustments
+      if (item.taxonomy_group === 'noise') {
+        // Noise items reduce score
+        if (item.fit_mode === 'exclude') noiseAdjustment -= 30;
+        else if (item.fit_mode === 'downrank') noiseAdjustment -= 15;
+      } else {
+        // Service, pursuit, market items boost score based on fit mode
+        const fitBonus = item.fit_mode === 'strong_fit' ? 5
+          : item.fit_mode === 'moderate_fit' ? 3
+          : item.fit_mode === 'monitor_only' ? 1
+          : item.fit_mode === 'downrank' ? -5
+          : 0;
+        taxonomyAdjustment += fitBonus;
+      }
+    }
+
+    // Add taxonomy context to confidence notes
+    if (taxonomyMatches.length > 0) {
+      const serviceMatches = taxonomyMatches.filter(m => m.group === 'service');
+      const marketMatches = taxonomyMatches.filter(m => m.group === 'market');
+      const noiseMatches = taxonomyMatches.filter(m => m.group === 'noise');
+      if (serviceMatches.length > 0) notes.push(`Service fit: ${serviceMatches.map(m => m.label).join(', ')}`);
+      if (marketMatches.length > 0) notes.push(`Market: ${marketMatches.map(m => m.label).join(', ')}`);
+      if (noiseMatches.length > 0) notes.push(`Noise flag: ${noiseMatches.map(m => m.label).join(', ')}`);
+    }
+  }
+
+  // Apply taxonomy adjustments (capped to prevent wild swings)
+  const adjustedRelevance = Math.min(100, Math.max(0, relevanceScore + Math.min(15, taxonomyAdjustment) + Math.max(-30, noiseAdjustment)));
+  // Recalculate pursuit if relevance changed
+  const finalRelevance = taxonomy ? adjustedRelevance : relevanceScore;
+  const finalPursuit = taxonomy ? Math.min(100, Math.max(0, Math.round(
+    finalRelevance * 0.5 + (hasTimeline ? 15 : 0) + (hasBudget ? 12 : 0) + (hasRFQ ? 18 : 0) + sourceConfidenceScore * 0.15
+  ))) : pursuitScore;
+
   // ─── AI Reason (rule-generated, enriched by AI later) ───────
   const aiReasonForAddition = generateAIReason(candidate, matchedKeywords, matchedFocusPointsList, matchedTargetOrgsList, source);
 
   return {
-    relevanceScore,
-    pursuitScore,
+    relevanceScore: finalRelevance,
+    pursuitScore: finalPursuit,
     sourceConfidenceScore,
     matchedKeywords: [...new Set(matchedKeywords)],
     matchedFocusPoints: matchedFocusPointsList,
     matchedTargetOrgs: matchedTargetOrgsList,
     confidenceNotes: notes.join('. ') + (notes.length ? '.' : ''),
     aiReasonForAddition,
+    taxonomyMatches,
   };
 }
 

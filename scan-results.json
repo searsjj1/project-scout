@@ -1,0 +1,376 @@
+{
+  "timestamp": "2026-03-29T17:38:50.471Z",
+  "seedVersion": "2026-03-29-v4-b10-decompose",
+  "duration": "43.0s",
+  "sourcesScanned": 58,
+  "fetchSuccesses": 56,
+  "fetchFailures": 2,
+  "leadsAdded": 9,
+  "leadsSuppressed": 39,
+  "laneBreakdown": {
+    "development_potentials": 4,
+    "active_leads": 3,
+    "news": 2
+  },
+  "statusBreakdown": {
+    "watch": 7,
+    "active": 2
+  },
+  "qualityGates": {
+    "genericTitle": 38,
+    "portalTitle": 0,
+    "notProjectSpecific": 0,
+    "lowQuality": 1,
+    "duplicate": 0,
+    "totalBlocked": 38
+  },
+  "suppressionReasons": {
+    "below_relevance_threshold": 1,
+    "annual_report": 1,
+    "vlt_trailing_period": 14,
+    "vlt_ui_fragment": 2,
+    "facility_rental": 1,
+    "org_name_title": 2,
+    "vlt_explanatory_clause": 1,
+    "vlt_truncated_ellipsis": 2,
+    "it_website_project": 2,
+    "park_equipment": 1,
+    "recreation_program": 1,
+    "outdated_plan": 1,
+    "school_admin_content": 6,
+    "standalone_school_name": 3,
+    "fee_schedule": 1
+  },
+  "leads": [
+    {
+      "title": "Scott Street Project",
+      "sourceId": "MT-MEP-002",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 58,
+      "pursuitScore": 32,
+      "description": "Southgate Crossing is intended to be a vibrant redevelopment project that integrates residential and recreational spaces to enhance the overall vitality of Midtown Missoula. Midtown Master Plan Southgate Draft Development Plan A plan developed by Southgate Mall Associates in partnership with MRA to ",
+      "evidence": "Project signal: Solicitation found via Invest in Transformation (redevelopment/economic development). Direct solicitation: \"Southgate Crossing - Solicitation Period Closed\". Artifact path: Invest in T",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Riverfront Triangle",
+      "sourceId": "MT-MEP-002",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 56,
+      "pursuitScore": 31,
+      "description": "Southgate Crossing is intended to be a vibrant redevelopment project that integrates residential and recreational spaces to enhance the overall vitality of Midtown Missoula. Midtown Master Plan Southgate Draft Development Plan A plan developed by Southgate Mall Associates in partnership with MRA to ",
+      "evidence": "Project signal: Solicitation found via Invest in Transformation (redevelopment/economic development). Direct solicitation: \"Southgate Crossing - Solicitation Period Closed\". Artifact path: Invest in T",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Riverfront Triangle URD",
+      "sourceId": "MT-MRA-002",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 41,
+      "pursuitScore": 25,
+      "description": "Riverfront Triangle URD — Source: Redevelopment/economic development",
+      "evidence": "Strategic area: Named district/project page found via MRA Urban Renewal Districts (redevelopment/economic development). Direct project detail: \"Riverfront Triangle URD\". Artifact path: MRA Urban Renew",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "MRA Urban Renewal Districts",
+      "sourceId": "MT-MRA-002",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 40,
+      "pursuitScore": 25,
+      "description": "Strategic redevelopment area with 2 associated project(s): Downtown Investment within an Urban Renewal District vs. Outside an Urban..., Riverfront Triangle URD. Source: MRA Urban Renewal Districts.",
+      "evidence": "Strategic district: MRA Urban Renewal Districts. Strategic redevelopment area with 2 associated project(s): Downtown Investment within an Urban Renewal District vs. Outside an Urban..., Riverfront Tri",
+      "location": "",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "redevelopment_area"
+    },
+    {
+      "title": "FY27 COMPASS Commission Facilitaton RFP",
+      "sourceId": "MT-MCO-008",
+      "lane": "active_leads",
+      "status": "active",
+      "relevanceScore": 74,
+      "pursuitScore": 54,
+      "description": "The Steering Committee has approved up to twenty-five thousand dollars ($25,000) for the support of the COMPASS project, to be allocated across administration, design, meeting costs, and other similar functions/costs. Offeror Phone Number: Offeror FAX Number (if applicable): Offeror Email Address: O",
+      "evidence": "Active solicitation: Solicitation found via Missoula County — Bids & Proposals (Auditor) (procurement portal). Direct solicitation: \"FY27 COMPASS Commission Facilitaton RFP\". Key finding: The Steering",
+      "location": "Missoula, MT",
+      "marketSector": "Civic",
+      "projectType": "RFQ/RFP",
+      "leadClass": "active_solicitation"
+    },
+    {
+      "title": "Missoula Public Health Enviromental Health Lobby &amp; Office Upgrades RFP",
+      "sourceId": "MT-MCO-008",
+      "lane": "active_leads",
+      "status": "active",
+      "relevanceScore": 84,
+      "pursuitScore": 59,
+      "description": "Missoula County has a construction budget of $350,000.00 for this project. The purpose of this project is to make better use of the 2nd floor office space for the staff, along with upgrading the lobby area to be more welcoming to the public, while also upgrading the area to incorporate ADA standards",
+      "evidence": "Active solicitation: Solicitation found via Missoula County — Bids & Proposals (Auditor) (procurement portal). Direct solicitation: \"Missoula Public Health Enviromental Health Lobby &amp; Office Upgra",
+      "location": "Missoula, MT",
+      "marketSector": "Commercial",
+      "projectType": "RFQ/RFP",
+      "leadClass": "active_solicitation"
+    },
+    {
+      "title": "Missoula Housing Authority — Development Projects",
+      "sourceId": "MT-HOUSING-002",
+      "lane": "news",
+      "status": "watch",
+      "relevanceScore": 33,
+      "pursuitScore": 16,
+      "description": "Development Projects — Source: News/media",
+      "evidence": "Project signal: Project detail found via Missoula Housing Authority — News (news/media). Direct project detail: \"Development Projects\". Location: Missoula, MT.",
+      "location": "Missoula, MT",
+      "marketSector": "Other",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "3 million fire station and the renovation of an existing station",
+      "sourceId": "MT-PUBLIC-001",
+      "lane": "active_leads",
+      "status": "watch",
+      "relevanceScore": 50,
+      "pursuitScore": 35,
+      "description": "3 million fire station and the renovation of an existing station — Source: Institutional/campus",
+      "evidence": "Project signal: Project detail found via Missoula Fire Department (institutional/campus records). Direct project detail: \"Fire Inspection and Plan Check Fees\". Artifact path: Missoula Fire Department ",
+      "location": "Missoula, MT",
+      "marketSector": "Public Safety",
+      "projectType": "Renovation",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Forest Service Building 26 Renovation",
+      "sourceId": "MT-CON-004",
+      "lane": "news",
+      "status": "watch",
+      "relevanceScore": 70,
+      "pursuitScore": 34,
+      "description": "Both Phase 1 and Phase 2 areas within the building were occupied during the construction of Phase 3. Phase 1 of the project was isolated to the south wing and the first floor of the west wing of the building. The infrastructure for a highly efficient HVAC system was put in place and the design allow",
+      "evidence": "Project signal: Project detail found via Quality Construction — Project Portfolio (contractor portfolio). Direct project detail: \"Forest Service Building 26 Renovation\". Artifact path: Quality Constru",
+      "location": "Missoula, MT",
+      "marketSector": "Higher Education",
+      "projectType": "Renovation",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    }
+  ],
+  "suppressed": [
+    {
+      "title": "Urban Renewal Plans",
+      "reason": "below_relevance_threshold",
+      "relevanceScore": 18
+    },
+    {
+      "title": "2024 Planning, Development and Sustainability Annual Report",
+      "reason": "annual_report",
+      "relevanceScore": 48
+    },
+    {
+      "title": "Smaller private development projects, like boundary line relocations or minor...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 26
+    },
+    {
+      "title": "Sheriff s Office, the Missoula Detention Facility, and District Courts These departments are funded by countywide taxes.",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 64
+    },
+    {
+      "title": "Learn about the historic Missoula County Courthouse",
+      "reason": "vlt_ui_fragment",
+      "relevanceScore": 46
+    },
+    {
+      "title": "Rent a County Facility",
+      "reason": "facility_rental",
+      "relevanceScore": 57
+    },
+    {
+      "title": "Development Opportunities",
+      "reason": "org_name_title",
+      "relevanceScore": 56
+    },
+    {
+      "title": "Development project that Missoulians and neighborhood residents can be proud...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 46
+    },
+    {
+      "title": "Development project and welcome all creative ideas and partners to get that...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 28
+    },
+    {
+      "title": "City of Missoula in 2020 to encourage development",
+      "reason": "vlt_explanatory_clause",
+      "relevanceScore": 51
+    },
+    {
+      "title": "Munity input have been done regarding the development potential for the site...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 51
+    },
+    {
+      "title": "…reet Master plan, a North and Westside community survey, the city-wide housi",
+      "reason": "vlt_truncated_ellipsis",
+      "relevanceScore": 51
+    },
+    {
+      "title": "Private partnership and development project that Missoulians and neighborhood...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 28
+    },
+    {
+      "title": "…s Urban Renewal Districts, the site has plenty of opportunities for public/",
+      "reason": "vlt_truncated_ellipsis",
+      "relevanceScore": 38
+    },
+    {
+      "title": "Seeing this site transform into model development project and welcome all...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 28
+    },
+    {
+      "title": "Vasecka 1 - Central Services - Defer Website Modernization - FY26 Amendment",
+      "reason": "it_website_project",
+      "relevanceScore": 68
+    },
+    {
+      "title": "Community Planning, Development, & Innovation",
+      "reason": "org_name_title",
+      "relevanceScore": 54
+    },
+    {
+      "title": "FY26 Central Services 4 Website Modernization",
+      "reason": "it_website_project",
+      "relevanceScore": 68
+    },
+    {
+      "title": "FY26 Parks FMRP CIP1 Replace-Upgrade Synthetic Turf and Equip",
+      "reason": "park_equipment",
+      "relevanceScore": 49
+    },
+    {
+      "title": "FY26 FMRP CIPO2 Replace-Upgrade Tennis and Pickleball",
+      "reason": "recreation_program",
+      "relevanceScore": 43
+    },
+    {
+      "title": "Downtown Investment within an Urban Renewal District vs. Outside an Urban...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 26
+    },
+    {
+      "title": "School Improvements YMCA Wellness Center Addition Florence Carlton School...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 73
+    },
+    {
+      "title": "Community Hospital Missoula Country Club Renovation Garlington Lohn Robinson...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 73
+    },
+    {
+      "title": "Sevelt Saloon Renovation ESI Laser Tenant Improvement Settlement I (Private...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 76
+    },
+    {
+      "title": "2008 Master Plan",
+      "reason": "outdated_plan",
+      "relevanceScore": 53
+    },
+    {
+      "title": "In-District High School Transfer Information",
+      "reason": "school_admin_content",
+      "relevanceScore": 42
+    },
+    {
+      "title": "Hellgate High School Scholarships",
+      "reason": "school_admin_content",
+      "relevanceScore": 42
+    },
+    {
+      "title": "Seeley-Swan High School Scholarships",
+      "reason": "school_admin_content",
+      "relevanceScore": 42
+    },
+    {
+      "title": "Sentinel High School Scholarships",
+      "reason": "school_admin_content",
+      "relevanceScore": 42
+    },
+    {
+      "title": "School Supplies",
+      "reason": "school_admin_content",
+      "relevanceScore": 42
+    },
+    {
+      "title": "Franklin Elementary School",
+      "reason": "standalone_school_name",
+      "relevanceScore": 53
+    },
+    {
+      "title": "Hawthorne Elementary School",
+      "reason": "standalone_school_name",
+      "relevanceScore": 53
+    },
+    {
+      "title": "Hellgate High School",
+      "reason": "standalone_school_name",
+      "relevanceScore": 42
+    },
+    {
+      "title": "Dick Anderson Construction Dick Anderson Construction The DAC Way...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 48
+    },
+    {
+      "title": "Construction Construction Post-Construction Our Work Commercial + Industrial...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 48
+    },
+    {
+      "title": "About the Project Building Updates",
+      "reason": "vlt_ui_fragment",
+      "relevanceScore": 28
+    },
+    {
+      "title": "Fire Inspection and Plan Check Fees",
+      "reason": "fee_schedule",
+      "relevanceScore": 50
+    },
+    {
+      "title": "Capital funding and infrastructure development, financial and capital...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 24
+    },
+    {
+      "title": "High School and Dual Enrollment",
+      "reason": "school_admin_content",
+      "relevanceScore": 44
+    }
+  ]
+}

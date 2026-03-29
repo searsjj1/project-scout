@@ -6,7 +6,7 @@ import { KEYS, SCHEMA_VERSION } from './schemas.js';
 import { storageGet, storageSet, storageDelete, getTable, setTable } from './storage.js';
 import {
   SEED_VERSION, SEED_SOURCE_FAMILIES, SEED_COVERAGE_REGIONS,
-  SEED_COUNTY_MAPPING, SEED_ENTITIES, SEED_SOURCES,
+  SEED_COUNTY_MAPPING, SEED_ENTITIES, SEED_SOURCES, SEED_TAXONOMY,
 } from './seedData.js';
 
 export function runMigration() {
@@ -122,6 +122,12 @@ function seedTables(notes) {
   setTable(KEYS.LEADS, []);
   notes.push('Initialized leads (empty).');
 
+  // Taxonomy
+  seedIfEmpty(KEYS.TAXONOMY, SEED_TAXONOMY, 'taxonomy items', notes);
+
+  // Client intelligence (starts empty)
+  seedIfEmpty(KEYS.CLIENTS, [], 'clients', notes);
+
   // Empty workflow tables
   seedIfEmpty(KEYS.PROPOSED_SOURCES, [], 'proposed sources', notes);
   seedIfEmpty(KEYS.PROPOSED_ENTITIES, [], 'proposed entities', notes);
@@ -162,6 +168,81 @@ function runSeedUpdate(settings, notes) {
     // Data tables — merge new records without overwriting existing edits
     mergeNewRecords(KEYS.ENTITIES, SEED_ENTITIES, 'entity_id', 'entities', notes);
     mergeNewRecords(KEYS.SOURCES, SEED_SOURCES, 'source_id', 'sources', notes);
+    mergeNewRecords(KEYS.TAXONOMY, SEED_TAXONOMY, 'taxonomy_id', 'taxonomy items', notes);
+
+    // V4: Missoula-only reset — apply active/inactive state from seed to existing sources
+    if (SEED_VERSION.includes('v4-')) {
+      const existing = getTable(KEYS.SOURCES);
+      const seedMap = new Map(SEED_SOURCES.map(s => [s.source_id, s]));
+
+      // Step A: Purge legacy INIT_SOURCES format entries (use 'id' instead of 'source_id').
+      // These are the old src-001…src-036 multi-region sources that bypass V4 deactivation
+      // because they have no source_id to look up in seedMap, so they stay active indefinitely.
+      const legacyEntries = existing.filter(s => !s.source_id && s.id);
+      const withoutLegacy = existing.filter(s => s.source_id || !s.id);
+      if (legacyEntries.length > 0) {
+        notes.push(`V4 cleanup: purged ${legacyEntries.length} legacy src-* format sources (old INIT_SOURCES).`);
+      }
+
+      // Step B: Force-sync active state AND seed-controlled fields (source_profile, etc.) from seed.
+      let activated = 0, deactivated = 0, profilesUpdated = 0;
+      const updated = withoutLegacy.map(src => {
+        const seed = seedMap.get(src.source_id);
+        if (seed) {
+          let next = src;
+          // Sync active/inactive state
+          const seedActive = seed.active !== false && !seed.v4_deactivated;
+          if (!seedActive && src.active !== false) {
+            deactivated++;
+            next = { ...next, active: false, v4_deactivated: seed.v4_deactivated || true };
+          } else if (seedActive && src.active === false && src.v4_deactivated) {
+            // Only re-activate if v4_deactivated flag indicates it was deactivated by V4 (not by user)
+            activated++;
+            next = { ...next, active: true, v4_deactivated: undefined };
+          }
+          // Always sync source_profile from seed (seed is authoritative — profiles are not user-editable)
+          if (seed.source_profile) {
+            profilesUpdated++;
+            next = { ...next, source_profile: seed.source_profile };
+          }
+          // Always sync source_url and source_name from seed (URL corrections and renames are authoritative)
+          if (seed.source_url && seed.source_url !== src.source_url) {
+            next = { ...next, source_url: seed.source_url };
+          }
+          if (seed.source_name && seed.source_name !== src.source_name) {
+            next = { ...next, source_name: seed.source_name };
+          }
+          return next;
+        }
+        return src;
+      });
+      if (legacyEntries.length > 0 || activated + deactivated > 0 || profilesUpdated > 0) {
+        setTable(KEYS.SOURCES, updated);
+        notes.push(`V4 scope reset: ${deactivated} sources deactivated (non-Missoula/broken), ${activated} reactivated, ${profilesUpdated} source profiles applied.`);
+      }
+      // Clear stale leads from non-Missoula sources
+      const leadKeys = ['ps_leads', 'ps_notpursued', 'ps_pruning_review_queue'];
+      const missoulaSourceIds = new Set(SEED_SOURCES.filter(s => !s.v4_deactivated).map(s => s.source_id));
+      for (const key of leadKeys) {
+        const leads = storageGet(key);
+        if (Array.isArray(leads) && leads.length > 0) {
+          const before = leads.length;
+          const filtered = leads.filter(l => {
+            // Keep leads from Missoula sources, manual leads, and Asana leads
+            if (!l.sourceId) return true; // manual or Asana lead
+            if (l.leadOrigin === 'manual' || l.leadOrigin === 'asana_business_pursuit' || l.leadOrigin === 'asana_import') return true;
+            if (l.pruneImmune || l.favorite) return true;
+            if (missoulaSourceIds.has(l.sourceId)) return true;
+            if (/missoula/i.test(l.location || '')) return true;
+            return false;
+          });
+          if (filtered.length < before) {
+            storageSet(key, filtered);
+            notes.push(`V4 cleanup: removed ${before - filtered.length} non-Missoula leads from ${key}.`);
+          }
+        }
+      }
+    }
     mergeCountyMappings(notes);
 
     // Update seed_version in settings

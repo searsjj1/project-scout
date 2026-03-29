@@ -14,6 +14,8 @@ export const KEYS = {
   LEADS:             'ps_leads',
   OWNER_PROJECTS:    'ps_owner_projects',
   INTAKE:            'ps_intake',
+  TAXONOMY:          'ps_taxonomy',
+  CLIENTS:           'ps_clients',
   SETTINGS:          'ps_settings',
   MIGRATION:         'ps_migration',
 };
@@ -55,6 +57,7 @@ export function createLead(o={}) {
     service_alignment:[], disciplines_required:[],
     source_id:null, source_name:'', source_url:'', source_family:'', source_tier:'',
     dates:[], evidence:[], documents:[], matched_keywords:[],
+    taxonomy_matches:[], // [{ taxonomy_id, group, label, fit_mode, matched_keywords }]
     internal_contact:'', notes:'', origin:'manual',
     monitoring_cadence:'standard', date_discovered:null, original_signal_date:null, last_checked:null,
     // Asana
@@ -96,5 +99,63 @@ export function createIntakeItem(o={}) {
     matched_source_id:null, proposed_source_needed:false,
     promoted_to_lead_id:null, proposed_source_id:null,
     notes:'', date_received:new Date().toISOString().split('T')[0], ...o,
+  };
+}
+
+/* ── TAXONOMY ───────────────────────────────────────────────────
+   Editable registry for service fit, pursuit signals, market
+   classification, noise suppression, and client intelligence.
+   Shaped for future: shared DB, hierarchy, audit history.
+   ─────────────────────────────────────────────────────────────── */
+
+export const TAXONOMY_GROUPS = ['service','pursuit','market','noise','client_intelligence'];
+export const FIT_MODES = ['strong_fit','moderate_fit','monitor_only','downrank','exclude'];
+export const TAXONOMY_STATUSES = ['active','inactive','archived'];
+
+export function createTaxonomyItem(o={}) {
+  return {
+    taxonomy_id: `TAX-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    taxonomy_group: 'service',       // service | pursuit | market | noise | client_intelligence
+    item_key: '',                    // machine-readable slug
+    label: '',                       // human-readable display name
+    parent_id: null,                 // for hierarchy (null = top-level)
+    fit_mode: 'moderate_fit',        // strong_fit | moderate_fit | monitor_only | downrank | exclude
+    status: 'active',                // active | inactive | archived
+    sort_order: 0,
+    include_keywords: [],            // keywords that signal this item
+    exclude_keywords: [],            // keywords that suppress this item
+    notes: '',
+    date_added: new Date().toISOString().split('T')[0],
+    date_modified: new Date().toISOString().split('T')[0],
+    added_by: 'system',
+    ...o,
+  };
+}
+
+/* ── CLIENT INTELLIGENCE (foundation) ──────────────────────────
+   Shaped for future Client Registry / Client News tab.
+   Links to existing entities. Supports manual + AI-found entries.
+   ─────────────────────────────────────────────────────────────── */
+
+export const CLIENT_STATUSES = ['current','past','target','prospect'];
+
+export function createClient(o={}) {
+  return {
+    client_id: `CLI-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+    client_name: '',
+    client_type: 'target',           // current | past | target | prospect
+    status: 'active',                // active | inactive | archived
+    entity_id: null,                 // link to ps_entities if applicable
+    primary_contact: '',
+    relationship_owner: '',          // internal staff who owns relationship
+    relationship_notes: '',
+    linked_lead_ids: [],             // leads associated with this client
+    linked_project_ids: [],          // owner_projects associated
+    notes: '',
+    date_added: new Date().toISOString().split('T')[0],
+    date_modified: new Date().toISOString().split('T')[0],
+    added_by: 'manual',              // manual | ai_suggested
+    ai_review_status: null,          // null | pending_review | confirmed | rejected
+    ...o,
   };
 }

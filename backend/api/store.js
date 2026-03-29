@@ -29,6 +29,7 @@ const ALLOWED_KEYS = new Set([
   'ps_submitted',
   'ps_notpursued',
   'ps_pruning_review_queue',
+  'ps_prune_memory',
 ]);
 
 // ── Upstash Redis REST client (zero deps, pure fetch) ──

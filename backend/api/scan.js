@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.0-20260324';
+const SCAN_BUILD_ID = 'scan-v4.10-20260329-batchtriage-b12';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -109,19 +109,19 @@ function getSourceProfile(src) {
   if (src.source_profile?.profile_type && SOURCE_PROFILES[src.source_profile.profile_type]) {
     return { ...SOURCE_PROFILES[src.source_profile.profile_type], ...src.source_profile };
   }
-  // Infer from source_family and name
+  // Infer from source_family and name — always include profile_type so logs show the actual type
   const family = src.source_family || '';
   const name = (src.source_name || src.name || '').toLowerCase();
   const url = (src.source_url || src.url || '').toLowerCase();
-  if (/SF-01/.test(family) || /procurement|bid|rfq|rfp/i.test(name)) return SOURCE_PROFILES.procurement;
-  if (/SF-02/.test(family) || /agenda|meeting|minutes|commission/i.test(name)) return SOURCE_PROFILES.agenda;
-  if (/SF-08/.test(family) || /budget|cip|capital|opengov/i.test(name) || /opengov\.com/.test(url)) return SOURCE_PROFILES.budget;
-  if (/SF-09/.test(family) || /redevelopment|mra|urban renewal|development (authority|partnership)/i.test(name)) return SOURCE_PROFILES.redevelopment;
-  if (/SF-07/.test(family) || /facilit|campus|university|college|school/i.test(name)) return SOURCE_PROFILES.institutional;
-  if (/news|missoulian|current|kpax|media/i.test(name) || /missoulian\.com|missoulacurrent|kpax/i.test(url)) return SOURCE_PROFILES.media;
-  if (/contractor|construction co|dac|quality|jackson|martel|langlas/i.test(name)) return SOURCE_PROFILES.contractor;
-  if (/employer|hospital|bank|providence|community medical/i.test(name)) return SOURCE_PROFILES.employer;
-  return SOURCE_PROFILES.institutional; // default
+  if (/SF-01/.test(family) || /procurement|bid|rfq|rfp/i.test(name)) return { ...SOURCE_PROFILES.procurement, profile_type: 'procurement' };
+  if (/SF-02/.test(family) || /agenda|meeting|minutes|commission/i.test(name)) return { ...SOURCE_PROFILES.agenda, profile_type: 'agenda' };
+  if (/SF-08/.test(family) || /budget|cip|capital|opengov/i.test(name) || /opengov\.com/.test(url)) return { ...SOURCE_PROFILES.budget, profile_type: 'budget' };
+  if (/SF-09/.test(family) || /redevelopment|mra|urban renewal|development (authority|partnership)/i.test(name)) return { ...SOURCE_PROFILES.redevelopment, profile_type: 'redevelopment' };
+  if (/SF-07/.test(family) || /facilit|campus|university|college|school/i.test(name)) return { ...SOURCE_PROFILES.institutional, profile_type: 'institutional' };
+  if (/news|missoulian|current|kpax|media/i.test(name) || /missoulian\.com|missoulacurrent|kpax/i.test(url)) return { ...SOURCE_PROFILES.media, profile_type: 'media' };
+  if (/contractor|construction co|dac|quality|jackson|martel|langlas/i.test(name)) return { ...SOURCE_PROFILES.contractor, profile_type: 'contractor' };
+  if (/employer|hospital|bank|providence|community medical/i.test(name)) return { ...SOURCE_PROFILES.employer, profile_type: 'employer' };
+  return { ...SOURCE_PROFILES.institutional, profile_type: 'institutional' }; // default
 }
 
 function profileMatchesIgnore(profile, text) {
@@ -135,6 +135,66 @@ function profileAllowsObjectType(profile, objectType) {
   if (profile.blocked_object_types?.includes(objectType)) return false;
   if (profile.allowed_object_types?.length > 0) return profile.allowed_object_types.includes(objectType);
   return true;
+}
+
+// ── v4-b6: News relevance filter ─────────────────────────────
+// News leads must contain actual development/building/project intelligence.
+// Generic civic, crime, weather, sports, lifestyle, dining, opinion, and
+// retrospective articles are not useful for A&E business development.
+function isNewsRelevant(title, context) {
+  const lo = (title || '').toLowerCase();
+  const ctx = (context || '').toLowerCase().slice(0, 600);
+  const combined = lo + ' ' + ctx;
+
+  // Must contain at least one A&E-relevant signal in title or context
+  const hasRelevantSignal = /\b(construction|renovation|building|facility|expansion|addition|replacement|project|design|architect|engineer|development|redevelopment|housing|school|hospital|campus|bond|levy|capital|cip|rfq|rfp|solicitation|permit|zoning|rezoning|subdivision|annexation|demolition|infrastructure|treatment plant|fire station|library|courthouse|police station|community center|recreation center|mixed.use|affordable housing|student housing|senior housing|apartment|condo|townhome|commercial|industrial|warehouse|office building|data center|hotel|resort|restoration|rehabilitation|modernization|remodel|upgrade|retrofit|master plan|feasibility|site selection|groundbreaking|foundation|steel|concrete|framing|crane|excavation)\b/.test(combined);
+
+  if (!hasRelevantSignal) return false;
+
+  // Block pure opinion/commentary even if they mention development words
+  const isOpinionCommentary = /\b(should\s+(be|have|consider|build|invest)|residents\s+(want|oppose|support|demand|urge)|editorial|opinion|letter\s+to\s+(the\s+)?editor|debate\s+over|controversy|critics?\s+say|opponents?\s+say|supporters?\s+say|rally\s+(against|for|to)|protest|petition)\b/.test(combined);
+  if (isOpinionCommentary && !/\b(rfq|rfp|solicitation|bid|groundbreaking|approved|funding|awarded|contract)\b/.test(combined)) return false;
+
+  // Block retrospective/completed articles without forward-looking signals
+  const isRetrospective = /\b(was\s+(built|completed|constructed|opened|demolished|renovated)|completed\s+in\s+\d{4}|opened\s+(in|last|this)\s|built\s+in\s+\d{4}|a\s+look\s+back|year\s+in\s+review|looking\s+back|decades?\s+ago)\b/.test(combined);
+  if (isRetrospective && !/\b(new\s+phase|phase\s+[2-9]|upcoming|planned|proposed|future|next|seeking|will\s+be|is\s+expected|anticipated|scheduled)\b/.test(combined)) return false;
+
+  return true;
+}
+
+// ── v4-b6: Retrospective/historical language filter ──────────
+// Titles that describe completed/past events are not forward-looking leads.
+function isRetrospectiveTitle(title) {
+  const lo = (title || '').toLowerCase();
+  // "X Was Built/Completed/Opened/Demolished in YYYY"
+  if (/\b(was\s+(built|completed|constructed|opened|demolished|renovated)|completed\s+in\s+\d{4}|opened\s+(in|last)\s|built\s+in\s+\d{4})\b/.test(lo)) {
+    return !/\b(new\s+phase|phase\s+[2-9]|upcoming|planned|proposed|expansion|future|next|seeking)\b/.test(lo);
+  }
+  // "A Look Back at X" / "Year in Review" / "Looking Back"
+  if (/\b(a\s+look\s+back|year\s+in\s+review|looking\s+back|years?\s+ago|decade\s+later)\b/.test(lo)) return true;
+  // "X Celebrates N Years" / "Anniversary"
+  if (/\b(celebrates?\s+\d+\s+years?|anniversary|milestone)\b/.test(lo) &&
+      !/\b(renovation|expansion|construction|project|design)\b/.test(lo)) return true;
+  return false;
+}
+
+// ── v4-b6: Generic news headline filter ──────────────────────
+// Catches news-style titles that are too vague or broad to be actionable leads.
+function isGenericNewsHeadline(title) {
+  const lo = (title || '').toLowerCase();
+  // Market trend commentary: "X Market Continues to Grow/Evolve/Struggle"
+  if (/\b(market|industry|sector)\s+(continues?|expected|projected|forecast|trending|slowing|growing|evolving|struggling|booming|recovering)\b/.test(lo)) return true;
+  // "Report: X" / "Study: X" / "Survey: X" — commentary not project
+  if (/^(report|study|survey|analysis|overview|update|recap|summary|review|roundup|preview|profile|spotlight|feature):/i.test(lo)) return true;
+  // "What You Need to Know About X" / "Everything You Need to Know"
+  if (/\b(what\s+you\s+need\s+to\s+know|everything\s+you|here.?s\s+what|what\s+to\s+expect|things?\s+to\s+know)\b/.test(lo)) return true;
+  // "How X Is Changing Y" / "Why X Matters"
+  if (/^(how|why)\s+.{5,}\s+(is|are|was|were|matters?|affects?|impacts?|changes?|work)\b/i.test(lo) &&
+      !/\b(rfq|rfp|solicitation|renovation|construction|design|project|building|facility)\b/.test(lo)) return true;
+  // List-style: "Top 10 X" / "5 Things" / "Best X"
+  if (/^(top\s+\d+|\d+\s+(things?|ways?|reasons?|tips?|facts?|trends?)|best|worst|biggest|most)\s+/i.test(lo) &&
+      !/\b(construction|project|renovation|building|facility|development)\b/.test(lo)) return true;
+  return false;
 }
 
 // ── PDF text extraction (lazy-loaded) ───────────────────────
@@ -317,11 +377,21 @@ function validateLiveTitle(title) {
   if (/\b(?:broadband|telecom|fiber\s+optic|internet\s+service|wireless\s+network)/i.test(tLo) && !/\b(?:building|facility|center|office|campus)\b/i.test(tLo)) return { pass: false, reason: 'non_core_telecom' };
   // Completed/awarded prefix
   if (/^(?:completed|awarded|closed|expired|archived|past)\s/i.test(tLo)) return { pass: false, reason: 'completed_prefix' };
+  // v4-b6r2: Single-letter fragment starts: "S Urban Renewal Districts..."
+  if (/^[A-Z]\s+[A-Z]/.test(t) && !/^[A-Z]\s+(Street|Avenue|Building|Block|Phase|Wing|Unit|Tower|Hall|Park)\b/.test(t)) return { pass: false, reason: 'single_letter_fragment' };
   // Must have at least 2 meaningful words
   const words = t.split(/\s+/).filter(w => w.length > 2);
   if (words.length < 2) return { pass: false, reason: 'too_few_words' };
+  // Explicitly truncated display titles — page truncation artifact (e.g. "Reet Master plan...", "Dous potential…")
+  if (/\.{2,}\s*$|…\s*$/.test(t)) return { pass: false, reason: 'truncated_ellipsis' };
+  // v4-b6r2: Leading ellipsis — fragment detected by cleanTitle partial-word check
+  if (/^…/.test(t)) return { pass: false, reason: 'truncated_ellipsis' };
   // Sentence fragments
   if (/^(?:in\s+addition|each\s+agency|year\s+plan|the\s+following|as\s+part\s+of|for\s+the\s+purpose|in\s+order\s+to|to\s+be\s+submitted|all\s+agencies|please\s+)/i.test(tLo)) return { pass: false, reason: 'sentence_fragment' };
+  // Explanatory purpose clauses — not project names (e.g. "City of Missoula in 2020 to encourage development")
+  if (/\b(?:to\s+encourage|to\s+promote|to\s+support\s+(?:the|local|community)|to\s+provide\s+(?:a|the|additional)|was\s+established|has\s+been\s+established|will\s+be\s+used\s+to|that\s+supports\s+the|which\s+supports|in\s+an\s+effort\s+to|in\s+response\s+to\s+(?:the|a)|to\s+meet\s+the\s+(?:needs|goals|demand|requirements))\b/i.test(tLo)) return { pass: false, reason: 'explanatory_clause' };
+  // "City/County of X in [year] [verb phrase]" pattern — organizational sentence fragment, not a project
+  if (/^(?:city|county|town|state)\s+of\s+\w+\s+in\s+\d{4}\b/i.test(t)) return { pass: false, reason: 'org_year_clause' };
   // "Org — context" where context is problematic
   const dashMatch = t.match(/^(.+?)\s+—\s+(.+)$/);
   if (dashMatch) {
@@ -501,6 +571,51 @@ function extractChildLinks(rawHtml, sourceUrl) {
       linkType = 'project_detail';
       relevanceHint = 7;
     }
+    // v4-b7: Development/housing/district project pages
+    else if (/\b(development|housing|redevelopment|district|corridor|master plan|facility|capital|improvement|renovation|construction)\b/i.test(lo) &&
+             /\b(project|detail|plan|update|phase|proposal|development|site)\b/i.test(lo + ' ' + hrefLo) &&
+             anchor.length >= 12 && anchor.length <= 150) {
+      linkType = 'project_detail';
+      relevanceHint = 6;
+    }
+    // v4-b7: Budget/CIP detail pages and amendment docs
+    else if (/\b(budget|cip|capital|amendment|appropriation)\b/i.test(lo) &&
+             /\b(detail|item|project|facility|department|update)\b/i.test(lo + ' ' + hrefLo) &&
+             !/\b(operating|general fund|personnel|payroll|insurance)\b/i.test(lo)) {
+      linkType = 'capital_document';
+      relevanceHint = 5;
+    }
+
+    // v4-b9: CivicEngage-specific link patterns — /{number}/{Slug-Name} URLs
+    // These are the primary navigation pattern for ci.missoula.mt.us and similar CivicEngage CMS sites.
+    // District, project, and plan pages use this format but don't match generic classifiers.
+    if (!linkType && /\/\d+\/[\w-]+/.test(hrefLo)) {
+      // Named URD/district/renewal pages — high value for redevelopment leads
+      if (/\b(urd|urban.renewal|district|front.street|riverfront|hellgate|north.reserve|scott.street|midtown)\b/i.test(lo + ' ' + hrefLo)) {
+        linkType = 'project_detail';
+        relevanceHint = 8;
+      }
+      // Named project/plan/development pages
+      else if (/\b(major.projects?|capital.project|development.project|renewal.plan|master.plan|workforce.housing|affordable.housing)\b/i.test(lo + ' ' + hrefLo)) {
+        linkType = 'project_detail';
+        relevanceHint = 7;
+      }
+      // Department project/facility pages with development keywords
+      else if (/\b(project|facility|improvement|renovation|construction|capital|development)\b/i.test(lo) &&
+               anchor.length >= 8 && anchor.length <= 100) {
+        linkType = 'project_detail';
+        relevanceHint = 5;
+      }
+    }
+
+    // v4-b9: Housing authority project pages (non-CivicEngage — flat slug pattern)
+    // Narrow: only match development/project URLs, not news articles or general pages
+    if (!linkType && /missoulahousing\.org/i.test(href)) {
+      if (/\/(development|bristlecone|villagio|trinity|project)/i.test(hrefLo)) {
+        linkType = 'project_detail';
+        relevanceHint = 7;
+      }
+    }
 
     if (linkType) {
       links.push({ url: href, anchorText: anchor, linkType, relevanceHint });
@@ -556,11 +671,68 @@ async function enrichFromChildLink(bestLink, src, log = () => {}, taxonomy = [])
         };
       }
     } else {
-      // ── HTML path: existing behavior ──
+      // ── HTML path ──
       const f = await fetchUrl(bestLink.url, 10000);
       if (!f.ok || !f.content || f.content.length < 100) return null;
       content = f.content.slice(0, 20000);
       title = f.title || bestLink.anchorText;
+
+      // v4-b8: Two-level child following for redevelopment/housing/district sources.
+      // If the first child page is still an index/container (lots of links, few project sentences),
+      // follow one more level to a project-specific child page.
+      const profileType = src?.source_profile?.profile_type || '';
+      const allowSecondLevel = ['redevelopment', 'institutional'].includes(profileType) ||
+        /\b(housing|development|district|corridor|renewal)\b/i.test(bestLink.anchorText || '');
+
+      if (allowSecondLevel && f.rawHtml) {
+        // Detect if child page is still a container: check if it has many project links
+        const childChildLinks = extractChildLinks(f.rawHtml, bestLink.url);
+        const projectChildLinks = childChildLinks.filter(cl =>
+          cl.relevanceHint >= 5 &&
+          /\b(project|development|district|plan|renovation|construction|facility|site|phase|housing|urd|renewal|redevelopment|capital|improvement|corridor|triangle|reserve)\b/i.test(cl.anchorText.toLowerCase())
+        );
+
+        // Only go deeper if: 1) child has project-bearing links, 2) content has few project sentences
+        const projectSentences = content.split(/(?<=[.!?\n])\s+/).filter(s =>
+          s.length > 30 && /\b(construction|renovation|project|facility|development|building|design|budget|funded)\b/i.test(s.toLowerCase())
+        );
+
+        if (projectChildLinks.length >= 1 && projectSentences.length < 3) {
+          // Pick the best second-level link
+          const best2 = projectChildLinks[0]; // Already sorted by relevanceHint
+          log(`    ↳ 2nd-level follow: "${best2.anchorText.slice(0, 50)}" (${best2.linkType}, hint=${best2.relevanceHint})`);
+
+          try {
+            const isPdf2 = best2.linkType === 'document_pdf' || best2.url.toLowerCase().endsWith('.pdf');
+            if (isPdf2) {
+              const pf2 = await fetchPdfContent(best2.url);
+              if (pf2.ok && pf2.content && isPdfTextUseful(pf2.content)) {
+                content = pf2.content;
+                title = pf2.title || best2.anchorText || title;
+                pdfParsed = true;
+                pdfPageCount = pf2.pageCount;
+                log(`    ↳ 2nd-level PDF parsed: ${pf2.pageCount} pages, ${pf2.content.length} chars`);
+              }
+            } else {
+              const f2 = await fetchUrl(best2.url, 10000);
+              if (f2.ok && f2.content && f2.content.length > 200) {
+                // Check if the second-level page has more project content than the first
+                const content2 = f2.content.slice(0, 20000);
+                const ps2 = content2.split(/(?<=[.!?\n])\s+/).filter(s =>
+                  s.length > 30 && /\b(construction|renovation|project|facility|development|building|design|budget|funded|acres|square\s+feet)\b/i.test(s.toLowerCase())
+                );
+                // v4-b9: Use second-level content if it has more project substance
+                // OR if first level had almost no project content (< 2 sentences)
+                if (ps2.length > projectSentences.length || (ps2.length >= 1 && projectSentences.length < 2)) {
+                  content = content2;
+                  title = f2.title || best2.anchorText || title;
+                  log(`    ↳ 2nd-level content used: ${content2.length} chars, ${ps2.length} project sentences (was ${projectSentences.length})`);
+                }
+              }
+            }
+          } catch { /* second-level fetch failure is non-fatal */ }
+        }
+      }
     }
 
     // ── Common enrichment extraction (works for both HTML and PDF text) ──
@@ -581,7 +753,8 @@ async function enrichFromChildLink(bestLink, src, log = () => {}, taxonomy = [])
       if (/select this as your preferred|cookie|terms of (use|service)/i.test(sl)) return false;
       return true;
     });
-    // Rank sentences by specificity: scope/purpose sentences > project-keyword sentences > generic
+    // Rank sentences by specificity: scope/purpose > procurement > budget/CIP > development > generic
+    // v4-b7: Expanded scoring for Watch-quality leads (budgets, CIP, development, timelines)
     const scoreSentence = (s) => {
       const sl = s.toLowerCase();
       let sc = 0;
@@ -592,6 +765,16 @@ async function enrichFromChildLink(bestLink, src, log = () => {}, taxonomy = [])
       if (/\b(construction|renovation|addition|expansion|replacement|remodel|new (building|facility|construction))\b/.test(sl)) sc += 2;
       if (/\b(design|architect|engineer|qualifications?|solicitation|rfq|rfp)\b/.test(sl)) sc += 1;
       if (/\b(project|building|facility|phase|campus|site)\b/.test(sl)) sc += 1;
+      // v4-b7: Budget/CIP/capital language (important for Watch leads from budget sources)
+      if (/\b(capital\s+improvement|cip\s+|capital\s+project|capital\s+budget|funded|budgeted|appropriat|bond\s+(issue|measure|election|funding)|levy|mill\s+levy|tif\s+(funded|district|revenue)|urban\s+renewal\s+district)\b/.test(sl)) sc += 3;
+      // v4-b7: Dollar amounts in sentences signal real budget context
+      if (/\$[\d,.]+\s*(million|mil|m\b|k\b|thousand)?/i.test(sl)) sc += 3;
+      // v4-b7: Development/planning language (important for redevelopment/MEP sources)
+      if (/\b(planned\s+(development|construction|expansion)|proposed\s+(development|project|facility|building)|development\s+(project|agreement|proposal|plan)|master\s+plan\s+(update|amendment|phase)|redevelopment\s+(project|plan|area|district))\b/.test(sl)) sc += 3;
+      // v4-b7: Timeline/scheduling signals
+      if (/\b(scheduled\s+for|anticipated\s+(start|completion|opening)|planned\s+for\s+\d|expected\s+(to|in)\s+\d|fy\s*\d{2,4}|phase\s+[1-9]|groundbreaking|under\s+design|design\s+phase)\b/.test(sl)) sc += 2;
+      // v4-b7: Named facility references (strong Watch signals)
+      if (/\b(fire\s+station|police\s+station|library|courthouse|school|hospital|clinic|treatment\s+(plant|facility)|community\s+center|recreation\s+center|senior\s+center|student\s+union|aquatic|natatorium|fieldhouse|arena|stadium|museum|terminal|hangar)\b/.test(sl)) sc += 2;
       return sc;
     };
     const scoredSentences = sentences.map(s => ({ text: s, score: scoreSentence(s) }))
@@ -659,8 +842,9 @@ function selectBestChildLink(childLinks, matchText, title) {
     if (score > bestScore) { bestScore = score; best = link; }
   }
 
-  // Only return if there's a meaningful match (link type was classified, scored at least 6)
-  return (best && bestScore >= 6) ? best : null;
+  // v4-b7: Lower threshold for non-procurement sources — development pages, housing, CIP often
+  // have project-relevant links that score 4-5 because they don't use procurement language
+  return (best && bestScore >= 4) ? best : null;
 }
 
 // ── Keyword pre-filter ──────────────────────────────────────
@@ -726,6 +910,18 @@ function isNavigationJunk(text) {
  */
 function cleanTitle(raw) {
   let t = raw.replace(/\s+/g, ' ').trim();
+  // Pre-flight: if the raw title starts or ends with an ellipsis, it is a mid-page text fragment
+  // and cannot be salvaged by cleaning — return the truncated form so validateLiveTitle can reject it.
+  if (/^[.…]|[.…]$/.test(t.replace(/\s/g, ''))) {
+    // Normalize to a canonical truncation marker so validateLiveTitle catches it
+    if (/\.{2,}\s*$|…\s*$/.test(t)) return t; // tail truncation — return as-is for rejection
+    if (/^\s*\.{2,}|^\s*…/.test(t)) return '…' + t.replace(/^\s*\.{2,}|^\s*…/, '').trim(); // head truncation
+  }
+  // v4-b6r2: Strip "(opens in new window/tab)" and similar document chrome
+  t = t.replace(/\s*\(opens?\s+(in\s+)?(a?\s*new\s+)?(window|tab)[\/\s)]*\)/gi, '');
+  t = t.replace(/\s*\(opens?\s+new\s+window\/tab\)/gi, '');
+  t = t.replace(/\s*\(PDF\)\s*/gi, '');
+  t = t.replace(/\s*\(external\s+link\)\s*/gi, '');
   // Strip leading junk: "RFQ #123 for " → keep just the project part handled elsewhere
   // Strip leading articles/prepositions if they start the title
   t = t.replace(/^(the|a|an|for|of|in|at|on|to|and|or)\s+/i, '');
@@ -747,9 +943,29 @@ function cleanTitle(raw) {
   // Step 15: Strip parenthetical office file references: "(OFFICE FILE 1863)", "(FILE NO. xxx)", "(Project #xxx)"
   t = t.replace(/\s*\(\s*(?:OFFICE FILE|FILE NO\.?|PROJECT #?)\s*[\w\-]+\s*\)/gi, '');
   // Strip trailing punctuation including periods (titles shouldn't end with period)
-  t = t.replace(/[.,;:\-–—]+$/, '').trim();
+  // Note: do NOT strip ellipsis here — validateLiveTitle rejects truncated titles
+  t = t.replace(/[,;:\-–—]+$/, '').trim();
+  // Strip a single trailing period only (not ellipsis — those are caught by validateLiveTitle)
+  if (/[^.]\.$/.test(t)) t = t.replace(/\.$/, '').trim();
   // Strip trailing articles/prepositions that suggest mid-sentence truncation
   t = t.replace(/\s+(the|a|an|of|for|in|at|on|to|and|or|with|from|by|is|are|was|were|has|have)$/i, '').trim();
+  // v4-b9: Strip trailing person-name fragments ("Phyllis J", "Robert K", "James L")
+  // These indicate mid-text truncation where a person's name was cut off
+  t = t.replace(/\s+[A-Z][a-z]+\s+[A-Z]\.?$/g, '').trim();
+  // v4-b6r2: Detect partial-word fragments BEFORE capitalization
+  // If the first word is lowercase and 1-5 chars, and not a known valid lowercase starter,
+  // it's likely a mid-text extraction artifact ("reet Master plan", "dous potential")
+  if (/^[a-z]{1,5}\s/.test(t)) {
+    const fw = t.split(/\s+/)[0];
+    const validLowerStarters = new Set(['via','per','pre','non','sub','mid','bid','new','old','big','all',
+      'air','bay','dam','gap','key','lab','map','oak','oil','red','run','sea','sun','top','van','war','zoo',
+      'ada','ave','day','due','end','inn','job','kit','log','low','max','net','off','one','out','raw','set',
+      'six','tax','two','use','way','yes','bus','gym','hub','lot','mix','pod','pub','rec','row','spa','vet']);
+    if (!validLowerStarters.has(fw)) {
+      // Return truncation marker so validateLiveTitle rejects it
+      return '…' + t;
+    }
+  }
   // Capitalize first letter
   if (t.length > 0) t = t[0].toUpperCase() + t.slice(1);
   return t;
@@ -844,6 +1060,9 @@ function isWatchTitleAcceptable(title) {
   // ── Block: page/document chrome that leaked into title ──
   // "View the FY25-26_Approved_Budget", "Click to download", file references
   if (/\b(view the|click (to|here|for)|download|log ?in|sign ?up|subscribe|print(able)?|page \d|see (more|all|details)|skip to|back to top|read more)\b/i.test(lo))
+    return { pass: false, reason: 'document_chrome' };
+  // "(opens in new window/tab)" or "(opens new window)" — nav chrome
+  if (/\(opens?\s+(in\s+)?(a?\s*new\s+)?(window|tab)/i.test(lo))
     return { pass: false, reason: 'document_chrome' };
 
   // ── Block: URL fragments that leaked into title ──
@@ -1745,6 +1964,11 @@ function extractDates(ctx) {
     /(?:FY|fiscal year)\s*(20[2-3]\d\s*[-–]\s*(?:20)?[2-3]\d)/i,
     // "Planned for 2026" or "Scheduled for Spring 2027"
     /(?:planned|scheduled|programmed|budgeted)\s+(?:for|in)\s+((?:spring|summer|fall|winter|early|late|mid)?\s*20[2-3]\d)/i,
+    // v4-b9: Redevelopment status signals
+    /(?:approved|adopted|amended|extended)\s+(?:in|on|by)\s*:?\s*(\w+\s*\d{1,2},?\s*\d{4}|\w+\s*\d{4})/i,
+    /(?:tif|urd|district)\s+(?:expires?|sunset|extended? (?:to|through|until))\s*:?\s*(\d{4}|[^.]{5,30})/i,
+    // "Under review" / "Pending approval" / "In design phase"
+    /(?:currently|presently)\s+(under\s+(?:review|design|construction|development)|in\s+(?:design|planning|construction)\s+phase|pending\s+(?:approval|review|funding))/i,
   ];
   for (const pat of tlPats) {
     const m = ctx.match(pat);
@@ -1822,14 +2046,17 @@ function inferMarket(ctx, taxonomy) {
   if (/\b(airport|terminal|hangar|aviation|runway|taxiway|apron)\b/.test(lo)) return 'Airports / Aviation';
   if (/\b(fire station|police|public safety|911|dispatch|jail|detention|corrections)\b/.test(lo)) return 'Public Safety';
   if (/\b(courthouse|city hall|government center|civic|municipal|county building|commission)\b/.test(lo)) return 'Civic';
+  // v4-b8: Check Mixed Use/redevelopment BEFORE Recreation — redevelopment pages
+  // often mention parks/recreation context alongside actual mixed-use development.
+  // Also check Housing before Recreation for the same reason.
+  if (/\b(mixed.?use|redevelopment|urban renewal|tif\b|tedd\b|urd\b|development (plan|agreement|project|district)|revitalization|midtown|riverfront|downtown\s+(development|redevelopment|master\s+plan))\b/.test(lo)) return 'Mixed Use';
+  if (/\b(affordable housing|workforce housing|multifamily|apartment|residential|housing authority|housing development|housing project)\b/.test(lo)) return 'Housing';
   if (/\b(library|community center|senior center|recreation|pool|aquatic|arena|stadium)\b/.test(lo)) return 'Recreation';
-  if (/\b(affordable housing|workforce housing|multifamily|apartment|residential|housing authority)\b/.test(lo)) return 'Housing';
   if (/\b(tribal|reservation|indian)\b/.test(lo)) return 'Tribal';
   if (/\b(water|wastewater|sewer|storm ?water|utility|treatment plant)\b/.test(lo)) return 'Infrastructure';
   if (/\b(hotel|resort|lodge|hospitality)\b/.test(lo)) return 'Hospitality';
   if (/\b(lab|laboratory|research|science)\b/.test(lo)) return 'Research / Lab';
   if (/\b(retail|commercial|office)\b/.test(lo)) return 'Commercial';
-  if (/\b(mixed.?use|redevelopment|urban renewal|tif\b|tedd\b|urd\b|development (plan|agreement|project|district)|revitalization)\b/.test(lo)) return 'Mixed Use';
   return 'Other';
 }
 
@@ -2114,12 +2341,24 @@ function extractLocation(ctx, src) {
   if (urlState === 'WA') return src.geography ? `${src.geography}, WA` : 'Washington';
   if (src.geography && src.geography !== 'Statewide') return `${src.geography}, MT`;
   if (src.county) return `${src.county}, MT`;
+  // v4-b8: Source entity/URL location fallback — if the source clearly serves a specific city
+  // (e.g., ci.missoula.mt.us, missoulahousing.org, missoulacounty.gov), use that city
+  const srcAll = (srcUrl + ' ' + srcName + ' ' + (src.organization || '') + ' ' + (src.entity_name || '')).toLowerCase();
+  if (/missoula/i.test(srcAll)) return 'Missoula, MT';
+  if (/kalispell/i.test(srcAll)) return 'Kalispell, MT';
+  if (/whitefish/i.test(srcAll)) return 'Whitefish, MT';
+  if (/hamilton/i.test(srcAll)) return 'Hamilton, MT';
+  if (/helena/i.test(srcAll)) return 'Helena, MT';
+  if (/great\s*falls/i.test(srcAll)) return 'Great Falls, MT';
+  if (/billings/i.test(srcAll)) return 'Billings, MT';
+  if (/bozeman/i.test(srcAll)) return 'Bozeman, MT';
   return 'Montana';
 }
 
 // ── Generate a real project description (not just regex match) ──
 function generateDescription(matchText, fullContext, leadClass, market, projectType, budget, timeline, src, title) {
   // ── Sentence scoring (shared with child enrichment) ──
+  // v4-b7: Expanded scoring for Watch-quality leads (budgets, CIP, development, timelines)
   const scoreSentence = (s) => {
     const sl = s.toLowerCase();
     let sc = 0;
@@ -2130,6 +2369,15 @@ function generateDescription(matchText, fullContext, leadClass, market, projectT
     if (/\b(construction|renovation|addition|expansion|replacement|remodel|new (building|facility|construction))\b/.test(sl)) sc += 2;
     if (/\b(design|architect|engineer|qualifications?|solicitation|rfq|rfp)\b/.test(sl)) sc += 1;
     if (/\b(project|building|facility|phase|campus|site)\b/.test(sl)) sc += 1;
+    // v4-b7: Budget/CIP/capital language
+    if (/\b(capital\s+improvement|cip\s+|capital\s+project|capital\s+budget|funded|budgeted|appropriat|bond\s+(issue|measure|election|funding)|levy|mill\s+levy|tif\s+(funded|district|revenue)|urban\s+renewal\s+district)\b/.test(sl)) sc += 3;
+    if (/\$[\d,.]+\s*(million|mil|m\b|k\b|thousand)?/i.test(sl)) sc += 3;
+    // v4-b7: Development/planning language
+    if (/\b(planned\s+(development|construction|expansion)|proposed\s+(development|project|facility|building)|development\s+(project|agreement|proposal|plan)|master\s+plan\s+(update|amendment|phase)|redevelopment\s+(project|plan|area|district))\b/.test(sl)) sc += 3;
+    // v4-b7: Timeline/scheduling signals
+    if (/\b(scheduled\s+for|anticipated\s+(start|completion|opening)|planned\s+for\s+\d|expected\s+(to|in)\s+\d|fy\s*\d{2,4}|phase\s+[1-9]|groundbreaking|under\s+design|design\s+phase)\b/.test(sl)) sc += 2;
+    // v4-b7: Named facility references
+    if (/\b(fire\s+station|police\s+station|library|courthouse|school|hospital|clinic|treatment\s+(plant|facility)|community\s+center|recreation\s+center|senior\s+center|aquatic|natatorium|fieldhouse|arena|stadium|museum|terminal|hangar)\b/.test(sl)) sc += 2;
     return sc;
   };
 
@@ -2171,9 +2419,24 @@ function generateDescription(matchText, fullContext, leadClass, market, projectT
   const extras = [];
   if (budget && !desc.includes('$')) extras.push(`Budget: ${budget}`);
   if (timeline && !desc.toLowerCase().includes(timeline.toLowerCase())) extras.push(`Timeline: ${timeline}`);
-  // Add source type context
+  // v4-b6: Add source type context — richer annotation for operational trust
   const srcType = src?.category || src?.source_family || '';
-  if (srcType && /capital|budget|cip/i.test(srcType) && !/budget|capital/i.test(desc)) {
+  const profileType = src?.source_profile?.profile_type || '';
+  if (profileType === 'procurement' && !/procurement|solicitation|rfq|rfp|bid/i.test(desc)) {
+    extras.push('Source: Procurement posting');
+  } else if (profileType === 'agenda' && !/agenda|meeting|council|commission/i.test(desc)) {
+    extras.push('Source: Public meeting/agenda');
+  } else if (profileType === 'budget' && !/budget|capital|cip/i.test(desc)) {
+    extras.push('Source: Capital/CIP planning');
+  } else if (profileType === 'redevelopment' && !/redevelopment|mra|urban renewal/i.test(desc)) {
+    extras.push('Source: Redevelopment/economic development');
+  } else if (profileType === 'media' && !/news|article|report/i.test(desc)) {
+    extras.push('Source: News/media');
+  } else if (profileType === 'contractor' && !/contractor|portfolio/i.test(desc)) {
+    extras.push('Source: Contractor portfolio');
+  } else if (profileType === 'institutional' && !/campus|university|institutional/i.test(desc)) {
+    extras.push('Source: Institutional/campus');
+  } else if (srcType && /capital|budget|cip/i.test(srcType) && !/budget|capital/i.test(desc)) {
     extras.push('Source: Capital/CIP planning');
   }
 
@@ -2338,6 +2601,92 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     }
     if (containerChildCandidates.length > 0) {
       log(`    📋 ${containerChildCandidates.length} child solicitation candidates extracted from listing page`);
+    }
+  }
+
+  // ── Step 0c: Profile-level named-child decomposition ──────────
+  // v4-b10: For sources with decompose_named_children config, create leads
+  // from named child links (URD districts, housing projects) instead of one
+  // generic parent lead. This is profile-driven, not generic crawling.
+  const decompConfig = profile.decompose_named_children;
+  const decompChildCandidates = [];
+  if (decompConfig?.enabled && childLinks && childLinks.length > 0) {
+    const patterns = (decompConfig.child_patterns || []).map(p => p.toLowerCase());
+    const maxChildren = decompConfig.max_children || 6;
+
+    // Find child links whose anchor text or URL matches the named patterns
+    const matchingLinks = childLinks.filter(cl => {
+      const anchorLo = (cl.anchorText || '').toLowerCase();
+      const urlLo = (cl.url || '').toLowerCase();
+      return patterns.some(p => anchorLo.includes(p) || urlLo.includes(p));
+    });
+
+    // Filter out links that are duplicates or clearly not useful
+    // Note: we bypass isNavigationJunk here because the profile's child_patterns
+    // already validate these are known named districts/projects (e.g., "URD II" is 6 chars
+    // but is a legitimate named district). The pattern-match is the quality gate.
+    const qualifiedLinks = matchingLinks.filter(cl => {
+      const anchor = cleanTitle(cl.anchorText || '');
+      if (anchor.length < 3 || anchor.length > 120) return false;
+      // Must not be the parent page itself
+      if (cl.url === src.url) return false;
+      // Skip obvious non-project content
+      if (/^(home|about|contact|staff|board|agenda|minutes|maps?)$/i.test(anchor.trim())) return false;
+      return true;
+    }).slice(0, maxChildren);
+
+    if (qualifiedLinks.length > 0) {
+      log(`    🔀 Profile decomposition: ${qualifiedLinks.length} named children found from ${matchingLinks.length} matching links`);
+      for (const cl of qualifiedLinks) {
+        const anchor = cleanTitle(cl.anchorText || '');
+        decompChildCandidates.push({
+          matchText: anchor,
+          fullContext: anchor,
+          wideContext: anchor,
+          patternIndex: -1,
+          extractionPath: 'decompose_named_child',
+          headingTitle: anchor,
+          childLink: cl,
+        });
+        log(`      → "${anchor}" (${cl.linkType || 'link'}, hint=${cl.relevanceHint || 0})`);
+      }
+    }
+
+    // Also extract named projects directly from page content if configured
+    if (decompConfig.extract_from_content && content) {
+      const contentLo = content.toLowerCase();
+      for (const pattern of patterns) {
+        // Look for pattern in content with surrounding project context
+        const patIdx = contentLo.indexOf(pattern);
+        if (patIdx >= 0) {
+          // Extract a sentence-sized chunk around the match
+          const start = Math.max(0, patIdx - 50);
+          const end = Math.min(content.length, patIdx + pattern.length + 150);
+          const chunk = content.slice(start, end).replace(/\s+/g, ' ').trim();
+          // Try to extract a project name from the chunk
+          const nameMatch = chunk.match(new RegExp(`((?:[A-Z][\\w'-]+\\s+){0,3}${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s+[A-Z][\\w'-]+){0,3})`, 'i'));
+          if (nameMatch) {
+            const projectName = cleanTitle(nameMatch[1].trim());
+            // Check it's not already in decompChildCandidates
+            const alreadyHave = decompChildCandidates.some(c =>
+              c.headingTitle.toLowerCase().includes(projectName.toLowerCase().slice(0, 15)) ||
+              projectName.toLowerCase().includes(c.headingTitle.toLowerCase().slice(0, 15))
+            );
+            if (!alreadyHave && projectName.length >= 5 && projectName.length <= 80 && !isNavigationJunk(projectName)) {
+              decompChildCandidates.push({
+                matchText: chunk,
+                fullContext: chunk,
+                wideContext: content.slice(Math.max(0, patIdx - 300), Math.min(content.length, patIdx + 500)),
+                patternIndex: -1,
+                extractionPath: 'decompose_content_extract',
+                headingTitle: projectName,
+                childLink: null,
+              });
+              log(`      → content-extracted: "${projectName}"`);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -2643,9 +2992,35 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     candidates.unshift(...containerChildCandidates);
     log(`    📋 Container decomposition: suppressed ${parentCount - candidates.length + containerChildCandidates.length} parent candidates, promoted ${containerChildCandidates.length} child candidates`);
   }
+
+  // ── Step 0c merge: Profile decomposition children replace parent candidates ──
+  if (decompChildCandidates.length > 0) {
+    const decompTitles = new Set(decompChildCandidates.map(c =>
+      (c.headingTitle || '').toLowerCase().slice(0, 30).replace(/[^a-z0-9]/g, '')
+    ));
+    const preDecompCount = candidates.length;
+    if (decompConfig?.suppress_parent) {
+      // When suppress_parent is true, replace ALL parent candidates with decomp children
+      candidates = decompChildCandidates;
+      log(`    🔀 Profile decomposition: replaced ${preDecompCount} parent candidates with ${decompChildCandidates.length} named children`);
+    } else {
+      // Otherwise, add decomp children while removing duplicates
+      candidates = candidates.filter(c => {
+        const key = (c.headingTitle || c.matchText || '').toLowerCase().slice(0, 30).replace(/[^a-z0-9]/g, '');
+        return !decompTitles.has(key);
+      });
+      candidates.unshift(...decompChildCandidates);
+      log(`    🔀 Profile decomposition: added ${decompChildCandidates.length} named children, ${preDecompCount - candidates.length + decompChildCandidates.length} parent candidates replaced`);
+    }
+  }
+
   const isHtmlExtracted = (ep) => ep && (ep.startsWith('html_') || ep === 'container_child');
   candidates.sort((a, b) => {
-    // Container children first, then HTML-extracted, then pattern-based
+    // Decomposed named children and container children first, then HTML-extracted, then pattern-based
+    const aDecomp = a.extractionPath === 'decompose_named_child' || a.extractionPath === 'decompose_content_extract';
+    const bDecomp = b.extractionPath === 'decompose_named_child' || b.extractionPath === 'decompose_content_extract';
+    if (aDecomp && !bDecomp) return -1;
+    if (bDecomp && !aDecomp) return 1;
     if (a.extractionPath === 'container_child' && b.extractionPath !== 'container_child') return -1;
     if (b.extractionPath === 'container_child' && a.extractionPath !== 'container_child') return 1;
     const aHtml = isHtmlExtracted(a.extractionPath);
@@ -3027,7 +3402,7 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     // ── Child-document enrichment ────────────────────────────
     // v32b: Container-child candidates already have their direct child link
     // Use it as the primary evidence and enrichment source.
-    const isContainerChild = extractionPath === 'container_child' && cand.childLink;
+    const isContainerChild = (extractionPath === 'container_child' || extractionPath === 'decompose_named_child') && cand.childLink;
 
     // Find all relevant child links for this lead
     const relevantChildLinks = isContainerChild
@@ -3087,13 +3462,18 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
           const childIsSpecific = isProjectSpecificTitle(bestChildTitle);
           const parentIsSpecific = isProjectSpecificTitle(title);
           // Prefer child title when: parent is generic/fallback, or child is more specific
-          if (titleIsGenericFallback || (!parentIsSpecific && childIsSpecific)) {
+          // v4-b9: Also prefer child when it contains a named district, URD, or specific area
+          const childHasNamedDistrict = /\b(urd|urban\s+renewal|district|front\s+street|riverfront|hellgate|north\s+reserve|scott\s+street|midtown|southgate|bristlecone|villagio|trinity)\b/i.test(bestChildTitle);
+          const parentIsGenericContainer = /^(urban\s+renewal\s+districts?|development\s+projects?|major\s+projects?|capital\s+projects?)$/i.test(title.trim());
+          if (titleIsGenericFallback || (!parentIsSpecific && childIsSpecific) || (childHasNamedDistrict && parentIsGenericContainer)) {
             log(`    ↳ child title preferred: "${bestChildTitle}" (was: "${title}")`);
             title = bestChildTitle;
             titleFromChild = true;
           }
         }
       }
+
+      // (entity enrichment moved to after child-enrichment block — v4-b9)
 
       // Dates: child page is the primary source for deadlines (it's the actual document)
       if (childEnrichment.childDates) {
@@ -3154,6 +3534,22 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       }
     }
 
+    // v4-b9: Entity enrichment for ALL leads (moved from inside child-enrichment block)
+    // Applies to short generic titles regardless of whether child enrichment succeeded
+    if (title && title.split(/\s+/).length <= 3) {
+      const titleLo2 = title.toLowerCase();
+      const isGenericShort = /^(treatment\s+facility|development\s+projects?|capital\s+projects?|master\s+plan|urban\s+renewal|improvement\s+projects?)$/i.test(titleLo2.trim());
+      if (isGenericShort) {
+        const orgName = src.organization || src.name || '';
+        const cleanOrg = orgName.replace(/\s*[–—-]\s*.+$/, '').replace(/^(city|county|town)\s+of\s+/i, '').trim();
+        if (cleanOrg && cleanOrg.length >= 3 && cleanOrg.length <= 50) {
+          const enrichedTitle = `${cleanOrg} — ${title}`;
+          log(`    ↳ title enriched with entity context: "${enrichedTitle}" (was: "${title}")`);
+          title = enrichedTitle;
+        }
+      }
+    }
+
     // ── Step 11: Single-project gate ──
     // After child enrichment had a chance to improve the title, reject leads
     // whose titles are still generic fallback ("Org — Solicitation" etc.).
@@ -3197,32 +3593,73 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       if (linkType === 'document_pdf') return 'Project document (PDF)';
       return 'Source document';
     };
+    // v4-b8: Include source profile type in evidence label for artifact trust
+    const profileLabel = src.source_profile?.profile_type || '';
+    const srcTypeContext = profileLabel === 'procurement' ? 'procurement portal'
+      : profileLabel === 'agenda' ? 'public meeting records'
+      : profileLabel === 'budget' ? 'capital/CIP budget'
+      : profileLabel === 'redevelopment' ? 'redevelopment/economic development'
+      : profileLabel === 'media' ? 'news/media'
+      : profileLabel === 'contractor' ? 'contractor portfolio'
+      : profileLabel === 'institutional' ? 'institutional/campus records'
+      : profileLabel === 'employer' ? 'employer/system records'
+      : sourceDesc;
+    // v4-b10: Enhanced evidence labels for decomposed leads
+    const isDecomposedLead = extractionPath === 'decompose_named_child' || extractionPath === 'decompose_content_extract';
     const evidenceLabel = bestChildLink
-      ? `${childTypeLabel(bestChildLink.linkType)} found via ${src.name}`
-      : `Signal detected in ${sourceDesc}`;
+      ? `${isDecomposedLead ? 'Named district/project page' : childTypeLabel(bestChildLink.linkType)} found via ${src.name} (${srcTypeContext})`
+      : `Signal detected in ${src.name} (${srcTypeContext})`;
     const evTitle = leadClass === 'active_solicitation'
       ? `Active solicitation: ${evidenceLabel}`
-      : `Project signal: ${evidenceLabel}`;
+      : isDecomposedLead
+        ? `Strategic area: ${evidenceLabel}`
+        : `Project signal: ${evidenceLabel}`;
 
-    // Build evidence summary: clearly label what came from the artifact vs. source page
+    // v4-b7: Build evidence summary — lead with what was found and why it matters
     const evDetailParts = [];
     evDetailParts.push(evTitle);
     if (bestChildLink) {
       const docLabel = childTypeLabel(bestChildLink.linkType).toLowerCase();
-      evDetailParts.push(`Direct ${docLabel}: "${bestChildLink.anchorText}"`);
+      evDetailParts.push(`Direct ${docLabel}: "${bestChildLink.anchorText.slice(0, 80)}"`);
     }
+    // v4-b9: Artifact path — show how the lead was reached
+    if (childEnriched && bestChildLink) {
+      const pathParts = [src.name];
+      if (bestChildLink.anchorText && bestChildLink.anchorText !== title) {
+        pathParts.push(bestChildLink.anchorText.slice(0, 50));
+      }
+      if (childEnrichment?.childTitle && childEnrichment.childTitle !== bestChildLink.anchorText) {
+        pathParts.push(childEnrichment.childTitle.slice(0, 50));
+      }
+      if (pathParts.length >= 2) {
+        evDetailParts.push(`Artifact path: ${pathParts.join(' → ')}`);
+      }
+    }
+    // v4-b7: Prefer child enrichment evidence snippet, then best scored sentence from description
     if (childEnrichment?.evidenceSnippet) {
       evDetailParts.push(`Key finding: ${childEnrichment.evidenceSnippet}`);
+    } else if (finalDescription && finalDescription.length > 30 && finalDescription !== matchText) {
+      // Use the best description content (already sentence-scored) instead of raw match text
+      const descSnippet = finalDescription.replace(/\s*—\s*Source:.+$/, '').trim().slice(0, 250);
+      if (descSnippet.length > 20) evDetailParts.push(`Key finding: ${descSnippet}`);
     } else if (matchText.length > 20) {
-      // Use match text but trim to the most informative part
       const trimmed = matchText.replace(/\s+/g, ' ').trim().slice(0, 200);
       evDetailParts.push(`Source context: ${trimmed}`);
     }
+    // v4-b7: Surface budget, timeline, and dates more prominently
     if (finalDates.action_due_date) evDetailParts.push(`Due: ${finalDates.action_due_date}`);
     if (finalDates.potentialTimeline && !finalDates.action_due_date) evDetailParts.push(`Timeline: ${finalDates.potentialTimeline}`);
     if (finalBudget) evDetailParts.push(`Budget: ${finalBudget}`);
+    // v4-b7: Surface bond/grant/TIF funding references from context
+    const fundingCtx = (childEnrichment?.enrichedContent || fullContext || '').toLowerCase().slice(0, 2000);
+    if (!finalBudget) {
+      if (/\b(bond\s+(measure|issue|election|funding|revenue))\b/.test(fundingCtx)) evDetailParts.push('Funding: Bond-funded');
+      else if (/\b(tif\s+(funded|revenue|district)|tax\s+increment\s+financ)\b/.test(fundingCtx)) evDetailParts.push('Funding: TIF district');
+      else if (/\b(grant\s+(funded|award|recipient)|federal\s+grant|state\s+grant|cdbg)\b/.test(fundingCtx)) evDetailParts.push('Funding: Grant-funded');
+      else if (/\b(mill\s+levy|levy\s+funded|voter.approved)\b/.test(fundingCtx)) evDetailParts.push('Funding: Levy/voter-approved');
+    }
     if (finalLocation && !evDetailParts.some(p => p.includes(finalLocation))) evDetailParts.push(`Location: ${finalLocation}`);
-    const evSummary = evDetailParts.join('. ').slice(0, 600) + '.';
+    const evSummary = evDetailParts.join('. ').slice(0, 700) + '.';
 
     // Why-it-matters and AI assessment use final (possibly child-improved) data
     const whyItMatters = generateWhyItMatters(leadClass, finalMarket, finalLocation, scores, src, finalServiceFit);
@@ -3337,7 +3774,8 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       watchCategory, projectStatus, extractionPath: extractionPath || 'pattern',
       leadObjectType: leadObjectType || 'unknown',
       // V4: Dashboard lane routing — profile takes priority, then object-type default
-      dashboardLane: profile.dashboard_lane || (
+      // v4-b12: Fixed field name: frontend reads dashboard_lane (snake_case)
+      dashboard_lane: profile.dashboard_lane || (
         leadObjectType === 'solicitation' || leadObjectType === 'project' ? 'active_leads'
         : leadObjectType === 'district' || leadObjectType === 'site' || leadObjectType === 'development_potential' ? 'development_potentials'
         : leadObjectType === 'news_item' ? 'news'
@@ -3414,6 +3852,7 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
         status: 'watch', leadClass: 'strategic_watch', leadOrigin: 'live',
         watchCategory: 'redevelopment_area', projectStatus: 'future_watch',
         extractionPath: 'district_parent',
+        dashboard_lane: 'development_potentials',
         sourceName: src.name, sourceUrl: src.url, sourceId: src.id,
         evidenceLinks: [src.url],
         evidenceSourceLinks: [{ url: src.url, label: src.name, linkType: 'source_page' }],
@@ -4166,9 +4605,11 @@ export default async function handler(req, res) {
     let skipNP = 0, skipDupe = 0, skipLowQuality = 0, fetchOk = 0, fetchFail = 0, parseHits = 0;
     // Step 12: Observability counters for quality gates
     let skipGenericTitle = 0, skipPortalTitle = 0, skipWeakAEFit = 0, skipInfraOnly = 0, skipNotProjectSpecific = 0;
-    // v31: Separate thresholds — Watch uses a much lower bar to preserve project generators
+    // v31: Separate thresholds — Watch uses a lower bar to preserve project generators
+    // v4-b6: Raised Watch from 15 to 22 — geography alone (20) plus 1 keyword (2) now barely passes.
+    // This prevents items with zero signal beyond geography from surviving.
     const MIN_BOARD_RELEVANCE_ACTIVE = 35;
-    const MIN_BOARD_RELEVANCE_WATCH = 15; // Watch is a monitoring layer, not a cleanup layer
+    const MIN_BOARD_RELEVANCE_WATCH = 22;
     // Track added titles for near-duplicate detection within this scan
     const addedTitles = [];
     const start = Date.now();
@@ -4232,18 +4673,27 @@ export default async function handler(req, res) {
         }
 
         // Near-duplicate check: word similarity against existing leads AND already-added leads
+        // v4-b10: Profile-decomposed leads (named districts/projects) are exempt from
+        // cross-source dedup — "Riverfront Triangle URD" from MRA is strategically distinct
+        // from "Riverfront Triangle" from MEP investment promotion
+        const isDecompLead = c.extractionPath === 'decompose_named_child' || c.extractionPath === 'decompose_content_extract';
         let nearDupe = false;
-        for (const ex of allEx) {
-          if (titleSimilarity(c.title, ex.title) >= 0.65) {
-            log(`    ⊘ near-duplicate of existing: "${c.title.slice(0,50)}" ≈ "${ex.title.slice(0,50)}"`);
-            nearDupe = true;
-            skipDupe++;
-            break;
+        if (!isDecompLead) {
+          for (const ex of allEx) {
+            if (titleSimilarity(c.title, ex.title) >= 0.65) {
+              log(`    ⊘ near-duplicate of existing: "${c.title.slice(0,50)}" ≈ "${ex.title.slice(0,50)}"`);
+              nearDupe = true;
+              skipDupe++;
+              break;
+            }
           }
         }
-        if (!nearDupe) {
+        if (!nearDupe && !isDecompLead) {
+          // v4-b6: Use a lower similarity threshold for news-lane leads (0.50 vs 0.65)
+          const isNewsLead = c.dashboard_lane === 'news' || (srcProfile.dashboard_lane === 'news' && !c.dashboard_lane);
+          const crossSourceThreshold = isNewsLead ? 0.50 : 0.65;
           for (const at of addedTitles) {
-            if (titleSimilarity(c.title, at) >= 0.65) {
+            if (titleSimilarity(c.title, at) >= crossSourceThreshold) {
               log(`    ⊘ near-duplicate of new lead: "${c.title.slice(0,50)}" ≈ "${at.slice(0,50)}"`);
               nearDupe = true;
               skipDupe++;
@@ -4337,11 +4787,146 @@ export default async function handler(req, res) {
           continue;
         }
 
+        // Step 14x: v4-b6r2 — Real-scan-driven noise patterns
+        // Standalone school name links — "[Name] Elementary/Middle/High School" without project action
+        if (/^[\w\s.']+\s+(elementary|middle|high)\s+school\s*$/i.test(clo.trim()) &&
+            !/\b(renovation|construction|design|rfq|rfp|addition|replacement|upgrade|expansion|remodel|bond|modernization|project)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'standalone_school_name' });
+          log(`    ⊘ BLOCKED (standalone school name): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // "High School and Dual Enrollment" — school program, not a project
+        if (/\b(dual\s+enrollment|high\s+school\s+and\s+dual)\b/i.test(clo) &&
+            !/\b(renovation|construction|design|rfq|rfp|building|facility|project)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'school_admin_content' });
+          log(`    ⊘ BLOCKED (school admin): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Scholarship, school supply, transfer info, recreation programs
+        if (/\b(scholarships?|school\s+supplies|transfer\s+information|student\s+data\s+privacy|student\s+forms|suicide\s+prevention|safe\s+firearm|traffic\s+education|volunteer\s+resources)\b/i.test(clo) &&
+            !/\b(renovation|construction|design|rfq|rfp|addition|replacement|upgrade|building\s+project)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'school_admin_content' });
+          log(`    ⊘ BLOCKED (school admin content): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Recreation programs/activities — not A&E projects
+        if (/\b(afterschool|after.?school|ropes?\s+course|team\s+building|summer\s+camp|folf|pickleball|tennis\s+rx|trails?\s+shuttle|recreation\s+guide|sports?\s+turf\s+dashboard|resident\s+discount|dual\s+enrollment|school.?s?\s+out)\b/i.test(clo) &&
+            !/\b(renovation|construction|design|rfq|rfp|addition|replacement|facility\s+(design|renovation|construction))\b/i.test(clo) &&
+            !/\bbuild(ing)?\b/i.test(clo.replace(/\bteam\s+building\b/gi, ''))) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'recreation_program' });
+          log(`    ⊘ BLOCKED (recreation program): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Permit fee schedules, inspection fees
+        if (/\b(fire\s+inspection\s+and\s+plan\s+check\s+fees|permit\s+fees?|fee\s+schedule|inspection\s+fees)\b/i.test(clo) &&
+            !/\b(renovation|construction|design|rfq|rfp|project|building\s+project)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'fee_schedule' });
+          log(`    ⊘ BLOCKED (fee schedule): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // IT/Website modernization — not A&E scope
+        if (/\bwebsite\s+(modernization|redesign|replacement|upgrade|migration|overhaul)\b/i.test(clo) &&
+            !/\b(architect|building|facility|a\/e|design\s+services)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'it_website_project' });
+          log(`    ⊘ BLOCKED (IT/website project): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Facility rental marketing pages
+        if (/\b(rent\s+a\s+(county|city|town)\s+facility|facility\s+rental|venue\s+rental|get\s+married\s+at)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'facility_rental' });
+          log(`    ⊘ BLOCKED (facility rental): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Annual report titles without project specifics
+        if (/\b(annual\s+report|year\s+in\s+review|annual\s+review)\b/i.test(clo) &&
+            !/\b(renovation|construction|design|rfq|rfp|project|facility|building)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'annual_report' });
+          log(`    ⊘ BLOCKED (annual report): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Chapter/section headings from documents
+        if (/^chapter\s+\d+\s*[-–—:]/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'chapter_heading' });
+          log(`    ⊘ BLOCKED (chapter heading): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Very old master plan references (pre-2015)
+        if (/^(19\d{2}|200\d|201[0-4])\s+master\s+plan\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'outdated_plan' });
+          log(`    ⊘ BLOCKED (outdated plan): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Contractor portfolio nav lists — multiple project names with dates concatenated
+        if (/\d{4}\s+[\w\s']+\s+\d{4}\s+[\w\s']+\d{4}/i.test(clo) || /\w+\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}/i.test(clo)) {
+          if (clo.length > 60 && (clo.match(/\d{4}/g) || []).length >= 2) {
+            skipGenericTitle++;
+            suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'nav_list_concat' });
+            log(`    ⊘ BLOCKED (nav list concatenation): ${c.title.slice(0,60)}`);
+            continue;
+          }
+        }
+        // Parks synthetic turf/equipment replacement — not A&E building scope
+        if (/\b(synthetic\s+turf|sports?\s+field\s+lighting|tennis\s+and\s+pickleball|turf\s+and\s+equip)\b/i.test(clo) &&
+            !/\b(architect|building|facility|renovation|design\s+services|a\/e)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'park_equipment' });
+          log(`    ⊘ BLOCKED (park equipment): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Standalone organization names as titles
+        if (/^(missoula\s+redevelopment\s+agency|community\s+planning[,\s&]+development[,\s&]*(innovation|sustainability)?|development\s+opportunities)$/i.test(clo.trim())) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'org_name_title' });
+          log(`    ⊘ BLOCKED (organization name): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Educational/comparison pages (not a project)
+        if (/\b(vs\.?\s+outside|within\s+an?\s+urban\s+renewal\s+district\s+vs|benefits?\s+of\s+an?\s+urd|how\s+(do|does)\s+an?\s+urd\s+work)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'educational_comparison' });
+          log(`    ⊘ BLOCKED (educational/comparison page): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Storm damage / permit information (not a project)
+        if (/\b(storm\s+damage\s+and\s+building\s+permit\s+information|building\s+permit\s+information)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'permit_info_page' });
+          log(`    ⊘ BLOCKED (permit info page): ${c.title.slice(0,60)}`);
+          continue;
+        }
+
+        // Step 14a: v4-b6 — Retrospective/historical title filter
+        // Titles describing completed/past events are not forward-looking leads.
+        if (isRetrospectiveTitle(c.title)) {
+          skipNotProjectSpecific++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'retrospective_title' });
+          log(`    ⊘ BLOCKED (retrospective title): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // Step 14b: v4-b6 — Generic news headline filter
+        // Catches market-commentary, listicle, and vague trend titles.
+        if (isGenericNewsHeadline(c.title)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'generic_news_headline' });
+          log(`    ⊘ BLOCKED (generic news headline): ${c.title.slice(0,60)}`);
+          continue;
+        }
+
         // Step 14: Universal title quality gates (Active + Watch)
         // These checks apply to ALL leads — a truncated mid-sentence fragment is never
         // an acceptable lead title regardless of Active/Watch classification.
-        // Truncated fragments ending with articles/prepositions
-        if (/\b(the|a|an|of|for|and|or|is|are|was|in|on|at|to|with|from|by)\s*\.{0,3}$/.test(clo)) {
+        // Truncated fragments ending with articles/prepositions/connectors
+        if (/\b(the|a|an|of|for|and|or|is|are|was|in|on|at|to|with|from|by|vs|vs\.)\s*\.{0,3}$/.test(clo)) {
           skipNotProjectSpecific++;
           suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'truncated_fragment' });
           log(`    ⊘ BLOCKED (truncated fragment): ${c.title.slice(0,60)}`);
@@ -4368,8 +4953,20 @@ export default async function handler(req, res) {
           }
         }
 
+        // Step 15: v4-b6 — News relevance gate
+        // News-lane leads must contain actual development/building/project intelligence.
+        // Generic civic, crime, opinion, retrospective news is filtered.
+        if (c.dashboard_lane === 'news' || (srcProfile.dashboard_lane === 'news' && !c.dashboard_lane)) {
+          if (!isNewsRelevant(c.title, c.description || '')) {
+            skipNotProjectSpecific++;
+            suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'news_not_relevant' });
+            log(`    ⊘ BLOCKED (news not A&E relevant): ${c.title.slice(0,60)}`);
+            continue;
+          }
+        }
+
         exSet.add(tl);
-        // v31: Quality gate — Watch uses a much lower relevance threshold (monitoring layer, not cleanup)
+        // v31: Quality gate — Watch uses a lower relevance threshold (monitoring layer, not cleanup)
         const isWatchCandidate = c.status === 'watch' || c.status === 'new' || c.status === 'monitoring';
         const minRelevance = isWatchCandidate ? MIN_BOARD_RELEVANCE_WATCH : MIN_BOARD_RELEVANCE_ACTIVE;
         if ((c.relevanceScore || 0) < minRelevance) {
@@ -4395,9 +4992,13 @@ export default async function handler(req, res) {
             continue;
           }
         }
+        // Attach dashboard_lane from source profile if not already set
+        if (!c.dashboard_lane && srcProfile.dashboard_lane) {
+          c.dashboard_lane = srcProfile.dashboard_lane;
+        }
         addedTitles.push(c.title);
         added.push(c);
-        log(`    ✚ [${c.status}] "${c.title.slice(0,60)}" | pStatus=${c.projectStatus||'?'} | wCat=${c.watchCategory||'?'} | path=${c.extractionPath||'pattern'} | src=${src.id||src.name}`);
+        log(`    ✚ [${c.status}] "${c.title.slice(0,60)}" | pStatus=${c.projectStatus||'?'} | wCat=${c.watchCategory||'?'} | lane=${c.dashboard_lane||'active_leads'} | path=${c.extractionPath||'pattern'} | src=${src.id||src.name}`);
       }
       if (added.length >= (action === 'daily' ? 10 : 40)) { log('  — lead cap reached'); break; }
     }

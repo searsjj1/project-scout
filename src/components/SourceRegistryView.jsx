@@ -797,7 +797,11 @@ function GeographyView({ regions, counties, onChanged }) {
   /* ── Derived data ── */
   const countyCountByRegion = useMemo(() => {
     const m = {};
-    counties.forEach(c => { m[c.coverage_region] = (m[c.coverage_region] || 0) + 1; });
+    counties.forEach(c => {
+      // Support both coverage_regions (array) and coverage_region (legacy string)
+      const regs = c.coverage_regions || (c.coverage_region ? [c.coverage_region] : []);
+      regs.forEach(rid => { m[rid] = (m[rid] || 0) + 1; });
+    });
     return m;
   }, [counties]);
 
@@ -822,7 +826,7 @@ function GeographyView({ regions, counties, onChanged }) {
   /* ── Filtered / sorted counties ── */
   const filteredCounties = useMemo(() => {
     let r = [...counties];
-    if (ctySearch) { const q = ctySearch.toLowerCase(); r = r.filter(x => x.county_name?.toLowerCase().includes(q) || x.state?.toLowerCase().includes(q) || x.coverage_region?.toLowerCase().includes(q) || x.office_assignment?.toLowerCase().includes(q)); }
+    if (ctySearch) { const q = ctySearch.toLowerCase(); r = r.filter(x => x.county_name?.toLowerCase().includes(q) || x.state?.toLowerCase().includes(q) || (x.coverage_regions || []).some(rid => rid.toLowerCase().includes(q)) || x.office_assignment?.toLowerCase().includes(q) || x.notes?.toLowerCase().includes(q)); }
     if (ctyState !== 'all') r = r.filter(x => x.state === ctyState);
     r.sort((a, b) => {
       const va = a[ctySort] || '', vb = b[ctySort] || '';
@@ -849,23 +853,38 @@ function GeographyView({ regions, counties, onChanged }) {
   const activeRegions   = regions.filter(r => r.active).length;
   const inactiveRegions = regions.length - activeRegions;
 
+  // Group regions by type for visual hierarchy
+  const regionTypeGroups = [
+    { type: 'umbrella', label: 'Montana Statewide', sublabel: 'Umbrella coverage — all Montana leads regardless of office', borderColor: '#bfdbfe', bgColor: '#f0f9ff' },
+    { type: 'office', label: 'Office Regions', sublabel: 'Territory assigned to a specific office — counties map to one office region', borderColor: '#bbf7d0', bgColor: '#f0fdf4' },
+    { type: 'adjacent_state', label: 'Adjacent States', sublabel: 'Out-of-state markets served by Missoula — leads also appear under Western MT', borderColor: '#fde68a', bgColor: '#fffbeb' },
+    { type: 'other', label: 'Other', sublabel: 'Future or specialized coverage', borderColor: '#e2e8f0', bgColor: '#f8fafc' },
+  ];
+
   return (
     <div>
       {/* ═══ COVERAGE REGIONS ═══ */}
-      <div style={{ fontSize:15, fontWeight:700, color:'#0f172a', marginBottom:12 }}>Coverage Regions</div>
+      <div style={{ fontSize:15, fontWeight:700, color:'#0f172a', marginBottom:6 }}>Coverage Regions</div>
+      <div style={{ fontSize:11.5, color:'#64748b', marginBottom:16, lineHeight:1.5 }}>
+        How geography is structured: <strong>Montana Statewide</strong> is the umbrella that includes all MT counties.
+        Each MT county also belongs to one <strong>office region</strong> (Western MT, Helena, Bozeman, or Billings).
+        <strong>Idaho</strong> and <strong>Washington</strong> are separate states served by the Missoula office — their leads appear under both their state region and Western MT, but <em>not</em> under Montana Statewide.
+      </div>
 
       {/* Stats bar */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(110px, 1fr))', gap:8, marginBottom:14 }}>
-        {[
-          { label:'Regions', value:regions.length, color:'#3b82f6' },
-          { label:'Active', value:activeRegions, color:'#10b981' },
-          { label:'Inactive', value:inactiveRegions, color: inactiveRegions > 0 ? '#f59e0b' : '#10b981' },
-        ].map(s => (
-          <div key={s.label} style={{ background:'#fff', borderRadius:9, padding:'10px 14px', border:'1px solid rgba(0,0,0,0.05)' }}>
-            <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8', marginBottom:3 }}>{s.label}</div>
-            <div style={{ fontSize:20, fontWeight:800, color:s.color, letterSpacing:'-0.02em' }}>{s.value}</div>
-          </div>
-        ))}
+      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+        <div style={{ flex:1, background:'#fff', borderRadius:8, padding:'10px 14px', border:'1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:10.5, fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.04em' }}>Regions</span>
+          <span style={{ fontSize:18, fontWeight:800, color:'#0f172a', marginLeft:'auto' }}>{regions.length}</span>
+        </div>
+        <div style={{ flex:1, background:'#fff', borderRadius:8, padding:'10px 14px', border:'1px solid #bbf7d0', display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:10.5, fontWeight:600, color:'#065f46', textTransform:'uppercase', letterSpacing:'0.04em' }}>Active</span>
+          <span style={{ fontSize:18, fontWeight:800, color:'#065f46', marginLeft:'auto' }}>{activeRegions}</span>
+        </div>
+        <div style={{ flex:1, background:'#fff', borderRadius:8, padding:'10px 14px', border: inactiveRegions > 0 ? '1px solid #fde68a' : '1px solid #f1f5f9', display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:10.5, fontWeight:600, color: inactiveRegions > 0 ? '#92400e' : '#94a3b8', textTransform:'uppercase', letterSpacing:'0.04em' }}>Inactive</span>
+          <span style={{ fontSize:18, fontWeight:800, color: inactiveRegions > 0 ? '#92400e' : '#cbd5e1', marginLeft:'auto' }}>{inactiveRegions}</span>
+        </div>
       </div>
 
       {/* Region toolbar */}
@@ -881,66 +900,81 @@ function GeographyView({ regions, counties, onChanged }) {
         </select>
       </div>
 
-      {/* Region table */}
-      <div style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:10, overflow:'hidden', marginBottom:28 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'2fr 1.2fr 1.2fr 0.8fr 1fr', gap:0, padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #e2e8f0', fontSize:10.5, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em' }}>
-          <div style={{ cursor:'pointer' }} onClick={() => handleRegSort('region_name')}>Region{arrow(regSort,'region_name',regDir)}</div>
-          <div style={{ cursor:'pointer' }} onClick={() => handleRegSort('office_assignment')}>Office{arrow(regSort,'office_assignment',regDir)}</div>
-          <div>Description</div>
-          <div style={{ cursor:'pointer' }} onClick={() => handleRegSort('counties')}>Counties{arrow(regSort,'counties',regDir)}</div>
-          <div>Scan Control</div>
-        </div>
-        {filteredRegions.length === 0 && (
-          <div style={{ padding:'36px 20px', textAlign:'center', color:'#94a3b8' }}>
-            <div style={{ fontSize:13, fontWeight:600 }}>No regions match your filters</div>
-          </div>
-        )}
-        {filteredRegions.map(r => (
-          <div key={r.region_id} style={{
-            display:'grid', gridTemplateColumns:'2fr 1.2fr 1.2fr 0.8fr 1fr',
-            gap:0, padding:'11px 16px', borderBottom:'1px solid #f1f5f9',
-            opacity: r.active ? 1 : 0.55, transition:'background 0.1s',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = ''; }}
-          >
-            <div style={{ fontSize:12.5, fontWeight:600, color:'#0f172a' }}>{r.region_name}</div>
-            <div style={{ fontSize:12, color:'#475569' }}>{r.office_assignment || '—'}</div>
-            <div style={{ fontSize:11, color:'#94a3b8', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.description || '—'}</div>
-            <div style={{ fontSize:13, fontWeight:700, color:'#0f172a' }}>{countyCountByRegion[r.region_id] || 0}</div>
-            <div>
-              <button
-                onClick={() => handleToggleRegion(r.region_id)}
-                title={r.active ? `Deactivate ${r.region_name} — sources only in this region will be skipped during scans` : `Activate ${r.region_name} — sources in this region will be included in scans`}
-                style={{
-                  fontSize:10, fontWeight:600, padding:'3px 10px', borderRadius:4, cursor:'pointer',
-                  border: r.active ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
-                  background: r.active ? '#dcfce7' : '#f1f5f9',
-                  color: r.active ? '#166534' : '#94a3b8',
-                  transition:'all 0.15s',
+      {/* Region table — grouped by type */}
+      {regionTypeGroups.map(group => {
+        const groupRegions = filteredRegions.filter(r => (r.region_type || 'other') === group.type);
+        if (groupRegions.length === 0) return null;
+        return (
+          <div key={group.type} style={{ marginBottom:16 }}>
+            {/* Group header */}
+            <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:6 }}>
+              <span style={{ fontSize:12, fontWeight:700, color:'#0f172a' }}>{group.label}</span>
+              <span style={{ fontSize:10.5, color:'#94a3b8', fontWeight:500 }}>{group.sublabel}</span>
+            </div>
+            <div style={{ background:'#fff', border:`1px solid ${group.borderColor}`, borderRadius:10, overflow:'hidden' }}>
+              {/* Column header */}
+              <div style={{ display:'grid', gridTemplateColumns:'1.8fr 1fr 2.5fr 0.6fr 0.8fr', gap:0, padding:'8px 16px', background:group.bgColor, borderBottom:`1px solid ${group.borderColor}`, fontSize:10, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em' }}>
+                <div>Region</div>
+                <div>Office</div>
+                <div>Description</div>
+                <div>Counties</div>
+                <div>Status</div>
+              </div>
+              {groupRegions.map(r => (
+                <div key={r.region_id} style={{
+                  display:'grid', gridTemplateColumns:'1.8fr 1fr 2.5fr 0.6fr 0.8fr',
+                  gap:0, padding:'10px 16px', borderBottom:'1px solid #f1f5f9',
+                  opacity: r.active ? 1 : 0.5, transition:'background 0.1s',
                 }}
-              >
-                {r.active ? 'Active' : 'Inactive'}
-              </button>
+                  onMouseEnter={e => { e.currentTarget.style.background = '#fafbfc'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = ''; }}
+                >
+                  <div style={{ fontSize:12.5, fontWeight:600, color:'#0f172a' }}>{r.region_name}</div>
+                  <div style={{ fontSize:12, color:'#475569' }}>{r.office_assignment || '—'}</div>
+                  <div style={{ fontSize:11, color:'#64748b', lineHeight:1.4 }}>{r.description || '—'}</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:'#0f172a' }}>{countyCountByRegion[r.region_id] || 0}</div>
+                  <div>
+                    <button
+                      onClick={() => handleToggleRegion(r.region_id)}
+                      title={r.active ? `Deactivate ${r.region_name}` : `Activate ${r.region_name}`}
+                      style={{
+                        fontSize:10, fontWeight:600, padding:'3px 10px', borderRadius:4, cursor:'pointer',
+                        border: r.active ? '1px solid #bbf7d0' : '1px solid #e2e8f0',
+                        background: r.active ? '#dcfce7' : '#f1f5f9',
+                        color: r.active ? '#166534' : '#94a3b8',
+                        transition:'all 0.15s',
+                      }}
+                    >
+                      {r.active ? 'Active' : 'Inactive'}
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        ))}
-      </div>
-      <div style={{ fontSize:11, color:'#94a3b8', textAlign:'right', marginTop:-22, marginBottom:24 }}>Showing {filteredRegions.length} of {regions.length} regions</div>
+        );
+      })}
+      <div style={{ fontSize:11, color:'#94a3b8', textAlign:'right', marginBottom:24 }}>Showing {filteredRegions.length} of {regions.length} regions</div>
 
       {/* ═══ COUNTY MAPPING ═══ */}
-      <div style={{ fontSize:15, fontWeight:700, color:'#0f172a', marginBottom:12 }}>County Mapping</div>
+      <div style={{ fontSize:15, fontWeight:700, color:'#0f172a', marginBottom:6 }}>County → Region Mapping</div>
+      <div style={{ fontSize:11.5, color:'#64748b', marginBottom:16, lineHeight:1.5 }}>
+        Each county is assigned to one or more coverage regions and one office.
+        Montana counties belong to <strong>Montana Statewide</strong> plus their office region.
+        Idaho and Washington counties belong to their state region only — they are <em>not</em> part of Montana Statewide.
+      </div>
 
       {/* County stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(110px, 1fr))', gap:8, marginBottom:14 }}>
+      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
         {[
-          { label:'Counties', value:counties.length, color:'#3b82f6' },
-          { label:'States', value:states.length, color:'#8b5cf6' },
-          { label:'Regions Referenced', value:Object.keys(countyCountByRegion).length, color:'#10b981' },
+          { label:'Counties', value:counties.length, color:'#0f172a', border:'#f1f5f9' },
+          { label:'MT', value:counties.filter(c => c.state === 'MT').length, color:'#065f46', border:'#bbf7d0' },
+          { label:'ID', value:counties.filter(c => c.state === 'ID').length, color:'#92400e', border:'#fde68a' },
+          { label:'WA', value:counties.filter(c => c.state === 'WA').length, color:'#92400e', border:'#fde68a' },
         ].map(s => (
-          <div key={s.label} style={{ background:'#fff', borderRadius:9, padding:'10px 14px', border:'1px solid rgba(0,0,0,0.05)' }}>
-            <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8', marginBottom:3 }}>{s.label}</div>
-            <div style={{ fontSize:20, fontWeight:800, color:s.color, letterSpacing:'-0.02em' }}>{s.value}</div>
+          <div key={s.label} style={{ flex:1, background:'#fff', borderRadius:8, padding:'10px 14px', border:`1px solid ${s.border}`, display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ fontSize:10.5, fontWeight:600, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.04em' }}>{s.label}</span>
+            <span style={{ fontSize:18, fontWeight:800, color:s.color, marginLeft:'auto' }}>{s.value}</span>
           </div>
         ))}
       </div>
@@ -959,31 +993,54 @@ function GeographyView({ regions, counties, onChanged }) {
 
       {/* County table */}
       <div style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:10, overflow:'hidden' }}>
-        <div style={{ display:'grid', gridTemplateColumns:'2fr 0.8fr 1.5fr 1.2fr', gap:0, padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #e2e8f0', fontSize:10.5, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1.8fr 0.6fr 2fr 1fr 1.5fr', gap:0, padding:'10px 16px', background:'#f8fafc', borderBottom:'1px solid #e2e8f0', fontSize:10, fontWeight:700, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em' }}>
           <div style={{ cursor:'pointer' }} onClick={() => handleCtySort('county_name')}>County{arrow(ctySort,'county_name',ctyDir)}</div>
           <div style={{ cursor:'pointer' }} onClick={() => handleCtySort('state')}>State{arrow(ctySort,'state',ctyDir)}</div>
-          <div style={{ cursor:'pointer' }} onClick={() => handleCtySort('coverage_region')}>Region{arrow(ctySort,'coverage_region',ctyDir)}</div>
+          <div>Coverage Regions</div>
           <div style={{ cursor:'pointer' }} onClick={() => handleCtySort('office_assignment')}>Office{arrow(ctySort,'office_assignment',ctyDir)}</div>
+          <div>Notes</div>
         </div>
         {filteredCounties.length === 0 && (
           <div style={{ padding:'36px 20px', textAlign:'center', color:'#94a3b8' }}>
             <div style={{ fontSize:13, fontWeight:600 }}>No counties match your filters</div>
           </div>
         )}
-        {filteredCounties.map((c, i) => (
-          <div key={`${c.state}-${c.county_name}-${i}`} style={{
-            display:'grid', gridTemplateColumns:'2fr 0.8fr 1.5fr 1.2fr',
-            gap:0, padding:'11px 16px', borderBottom:'1px solid #f1f5f9', transition:'background 0.1s',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = ''; }}
-          >
-            <div style={{ fontSize:12.5, fontWeight:600, color:'#0f172a' }}>{c.county_name}</div>
-            <div style={{ fontSize:12, color:'#475569', fontWeight:600 }}>{c.state}</div>
-            <div style={{ fontSize:12, color:'#64748b' }}>{c.coverage_region || '—'}</div>
-            <div style={{ fontSize:12, color:'#64748b' }}>{c.office_assignment || '—'}</div>
-          </div>
-        ))}
+        {filteredCounties.map((c, i) => {
+          const isOutOfState = c.state !== 'MT';
+          const regionLabels = (c.coverage_regions || []).map(rid => {
+            const reg = regions.find(r => r.region_id === rid);
+            return reg ? reg.region_name : rid;
+          });
+          return (
+            <div key={`${c.state}-${c.county_name}-${i}`} style={{
+              display:'grid', gridTemplateColumns:'1.8fr 0.6fr 2fr 1fr 1.5fr',
+              gap:0, padding:'10px 16px', borderBottom:'1px solid #f1f5f9', transition:'background 0.1s',
+              background: isOutOfState ? '#fffbeb08' : undefined,
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = isOutOfState ? '#fffbeb' : '#f8fafc'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = isOutOfState ? '' : ''; }}
+            >
+              <div style={{ fontSize:12.5, fontWeight:600, color:'#0f172a' }}>{c.county_name}</div>
+              <div>
+                <span style={{
+                  fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:3,
+                  background: c.state === 'MT' ? '#d1fae5' : c.state === 'ID' ? '#fef3c7' : c.state === 'WA' ? '#fef3c7' : '#f1f5f9',
+                  color: c.state === 'MT' ? '#065f46' : c.state === 'ID' ? '#92400e' : c.state === 'WA' ? '#92400e' : '#64748b',
+                }}>{c.state}</span>
+              </div>
+              <div style={{ display:'flex', gap:4, flexWrap:'wrap', alignItems:'center' }}>
+                {regionLabels.map(name => (
+                  <span key={name} style={{ fontSize:10, fontWeight:600, padding:'1px 6px', borderRadius:3, background:'#f1f5f9', color:'#475569' }}>{name}</span>
+                ))}
+                {isOutOfState && (
+                  <span style={{ fontSize:9, fontWeight:600, padding:'1px 5px', borderRadius:3, background:'#eff6ff', color:'#3b82f6' }}>+ Western MT</span>
+                )}
+              </div>
+              <div style={{ fontSize:12, color:'#64748b' }}>{c.office_assignment || '—'}</div>
+              <div style={{ fontSize:10.5, color:'#94a3b8' }}>{c.notes || '—'}</div>
+            </div>
+          );
+        })}
       </div>
       <div style={{ fontSize:11, color:'#94a3b8', textAlign:'right', marginTop:8 }}>Showing {filteredCounties.length} of {counties.length} counties</div>
     </div>

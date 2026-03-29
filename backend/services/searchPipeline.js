@@ -37,6 +37,12 @@ const ALL_SIGNAL_TERMS = [
   'annexation', 'rezoning', 'redevelopment', 'tenant improvement',
   'public works', 'utility', 'infrastructure', 'construction',
   'building', 'facility', 'project', 'development', 'expansion',
+  // Future-signal / Watch keywords — LRBP, capital planning, facility programs
+  'lrbp', 'long-range building', 'capital plan', 'deferred maintenance',
+  'facility assessment', 'modernization', 'building replacement', 'building program',
+  'facilities planning', 'campus master plan',
+  // EDO / strategic-planning Watch keywords — only specific terms
+  'CEDS', 'site selection', 'business park', 'industrial park',
 ];
 
 /**
@@ -64,7 +70,7 @@ function passesKeywordPreFilter(content, source) {
 
   // Require at least 2 signal terms for most sources
   // High-credibility sources only need 1
-  const highCred = ['State Procurement', 'County Commission', 'City Council', 'Planning & Zoning'];
+  const highCred = ['State Procurement', 'County Commission', 'City Council', 'Planning & Zoning', 'School Board', 'Economic Development', 'Capital Planning'];
   const threshold = highCred.includes(source.category) ? 1 : 2;
 
   return { passes: hits >= threshold, hitCount: hits, matchedTerms: matched };
@@ -120,6 +126,7 @@ export async function runBackfill({
   targetOrgs,
   existingLeads = [],
   notPursuedLeads = [],
+  taxonomy = [],
   settings,
   onProgress = null,
   onLog = null,
@@ -188,7 +195,7 @@ export async function runBackfill({
 
     // Fall back to rule-based extraction if AI isn't available or returned nothing
     if (leads.length === 0) {
-      leads = ruleBasedExtraction(result.content, source, matchedTerms);
+      leads = ruleBasedExtraction(result.content, source, matchedTerms, taxonomy);
       log(`  [Rules] ${source.name}: ${leads.length} candidate(s) from keyword matching`);
     }
 
@@ -210,12 +217,33 @@ export async function runBackfill({
   }
 
   log(`Found ${allCandidates.length} total candidates from ${results.sourcesWithSignals} sources with signals`);
-  results.leadsDiscovered = allCandidates.length;
 
-  // Step 4: Score all candidates
+  // Step 2b: Taxonomy noise pre-filter — exclude candidates matching noise/exclude taxonomy items
+  const noiseExclusions = (taxonomy || []).filter(t => t.status === 'active' && t.taxonomy_group === 'noise' && t.fit_mode === 'exclude' && t.include_keywords.length > 0);
+  let noiseFiltered = 0;
+  const filteredCandidates = noiseExclusions.length > 0 ? allCandidates.filter(c => {
+    const text = `${c.title || ''} ${c.description || ''}`.toLowerCase();
+    for (const noise of noiseExclusions) {
+      const includeHit = noise.include_keywords.some(kw => text.includes(kw.toLowerCase()));
+      if (!includeHit) continue;
+      const excludeHit = noise.exclude_keywords.length > 0 && noise.exclude_keywords.some(kw => text.includes(kw.toLowerCase()));
+      if (excludeHit) continue;
+      // Matched noise exclusion — suppress this candidate
+      noiseFiltered++;
+      log(`  [Noise] Excluded: "${c.title}" — matched noise rule "${noise.label}"`);
+      return false;
+    }
+    return true;
+  }) : allCandidates;
+
+  if (noiseFiltered > 0) log(`Noise filter removed ${noiseFiltered} candidate(s)`);
+  results.noiseFiltered = noiseFiltered;
+  results.leadsDiscovered = filteredCandidates.length;
+
+  // Step 4: Score all candidates (taxonomy-aware)
   log('Step 3: Scoring candidates...');
-  const scoredCandidates = allCandidates.map(c => {
-    const scores = scoreLead(c, c._source, focusPoints, targetOrgs, settings);
+  const scoredCandidates = filteredCandidates.map(c => {
+    const scores = scoreLead(c, c._source, focusPoints, targetOrgs, settings, taxonomy);
     return { ...c, ...scores };
   });
 
@@ -294,6 +322,7 @@ export async function runDailyScan({
   targetOrgs,
   existingLeads = [],
   notPursuedLeads = [],
+  taxonomy = [],
   settings,
   onProgress = null,
   onLog = null,
@@ -319,6 +348,7 @@ export async function runDailyScan({
     targetOrgs,
     existingLeads,
     notPursuedLeads,
+    taxonomy,
     settings,
     onProgress,
     onLog: log,
@@ -347,6 +377,7 @@ export async function runMaintenance({
   sources,
   focusPoints,
   targetOrgs,
+  taxonomy = [],
   evidence = {},
   settings,
   onProgress = null,
@@ -393,10 +424,10 @@ export async function runMaintenance({
       continue;
     }
 
-    // Score the new content against this lead
+    // Score the new content against this lead (taxonomy-aware)
     const newScores = scoreLead(
       { title: lead.title, description: lead.description, sourceContent: result.content },
-      linkedSource, focusPoints, targetOrgs, settings
+      linkedSource, focusPoints, targetOrgs, settings, taxonomy
     );
 
     // Create evidence if signals found
@@ -461,6 +492,32 @@ function isJunkText(text) {
 }
 
 /**
+ * Check if a lead title looks like a portal/listing fragment.
+ */
+function isPortalFragmentTitle(title) {
+  const lo = (title || '').toLowerCase().trim();
+  if (/^(current|open|active|closed|awarded|pending)\s+(solicitations?|bids?|rfps?|rfqs?|opportunities|projects?|listings?)$/i.test(lo)) return true;
+  if (/^(solicitations?|bids?|rfps?|rfqs?|opportunities|procurement)\s+(list|index|page|board|calendar|schedule|archive)$/i.test(lo)) return true;
+  if (/^(public (works?|notices?|bids?)|bid (board|opportunities)|procurement (portal|page))$/i.test(lo)) return true;
+  if (/^[\w\s&]+\s*[–—-]\s*(solicitations?|bids?|rfps?|rfqs?|opportunities|procurement|public notices?)$/i.test(lo)) return true;
+  if (/^(meeting|agenda|minutes|packet|resolution|ordinance)\s+/i.test(lo) && !/\b(renovation|construction|building|facility|addition|expansion|project)\b/i.test(lo)) return true;
+  return false;
+}
+
+/**
+ * Check if candidate has enough architectural-scope evidence.
+ */
+function hasArchitecturalScope(ctx, market) {
+  const lo = (ctx || '').toLowerCase();
+  const buildingMarkets = ['K-12', 'Higher Education', 'Healthcare', 'Civic', 'Public Safety',
+    'Housing', 'Hospitality', 'Recreation', 'Commercial', 'Research / Lab', 'Tribal'];
+  if (buildingMarkets.includes(market)) return true;
+  if (market === 'Airports / Aviation') return /\b(terminal|hangar|building|facility|renovation|addition|fbo)\b/i.test(lo);
+  if (market === 'Infrastructure') return /\b(treatment (plant|facility)|building|architect|facility (design|renovation|addition)|pump (house|building)|control (building|room))\b/i.test(lo);
+  return /\b(architect|building|facility|renovation|addition|remodel|interior|design services|a\/e|construction of (?:a |the )?(?:new )?(?:building|facility|school|clinic|station|center|library|courthouse)|floor plan|square (feet|foot|ft)|sf\b)/i.test(lo);
+}
+
+/**
  * Classify context as Active (solicitation) vs Watch (future signal).
  */
 function classifyLeadType(context, matchedTerms) {
@@ -522,11 +579,24 @@ function extractBudgetFromContext(context) {
 }
 
 /**
+ * Clean a raw title: strip trailing dates/numbers, normalize whitespace, capitalize.
+ */
+function cleanTitleText(raw) {
+  let t = (raw || '').replace(/\s+/g, ' ').trim();
+  t = t.replace(/^(the|a|an|for|of|in|at|on|to|and|or)\s+/i, '');
+  t = t.replace(/\s*\(?\d{1,2}\/\d{1,2}\/\d{2,4}\)?$/, '');
+  t = t.replace(/\s*#\s*\d[\w-]*$/, '');
+  t = t.replace(/[,;:\-–—]+$/, '').trim();
+  if (t.length > 0) t = t[0].toUpperCase() + t.slice(1);
+  return t;
+}
+
+/**
  * Rule-based lead extraction (no AI required).
  * Improved: filters nav junk, classifies Active/Watch, extracts dates/budgets,
  * builds richer descriptions and evidence.
  */
-function ruleBasedExtraction(content, source, matchedTerms) {
+function ruleBasedExtraction(content, source, matchedTerms, taxonomy) {
   if (!content) return [];
 
   // Clean nav/menu text before extraction
@@ -560,26 +630,33 @@ function ruleBasedExtraction(content, source, matchedTerms) {
       const quotedName = match[0].match(/[""]([^""]{10,80})[""]/);
       const forClause = match[0].match(/(?:rfq|rfp|request for (?:qualifications?|proposals?))\s+(?:for|:|–|—)\s*([^.]{10,80})/i);
       let title = '';
-      if (quotedName && !isJunkText(quotedName[1])) title = quotedName[1].trim();
-      else if (forClause && !isJunkText(forClause[1])) title = forClause[1].trim();
+      if (quotedName && !isJunkText(quotedName[1])) title = cleanTitleText(quotedName[1]);
+      else if (forClause && !isJunkText(forClause[1])) title = cleanTitleText(forClause[1]);
       else {
         const trimmed = match[0].replace(/\s+/g, ' ').trim();
-        if (trimmed.length <= 80 && !isJunkText(trimmed)) title = trimmed;
+        if (trimmed.length <= 80 && !isJunkText(trimmed)) title = cleanTitleText(trimmed);
         else {
           const clauses = trimmed.split(/[;—–|]/);
-          for (const c of clauses) { if (c.trim().length > 15 && c.trim().length < 80 && !isJunkText(c.trim())) { title = c.trim(); break; } }
+          for (const c of clauses) { if (c.trim().length > 15 && c.trim().length < 80 && !isJunkText(c.trim())) { title = cleanTitleText(c); break; } }
         }
       }
       if (!title || isJunkText(title)) {
-        const type = /rfq|rfp/i.test(match[0]) ? 'Solicitation' : /renovation|remodel/i.test(match[0]) ? 'Renovation Project'
-          : /addition|expansion/i.test(match[0]) ? 'Expansion Project' : /bond|levy/i.test(match[0]) ? 'Bond/Levy Program' : 'Project Signal';
-        title = `${source.organization || 'Unknown'} — ${type}`;
+        // Step 11: Skip leads where no project-specific title could be extracted.
+        // Generic "Org — Type" titles pollute the board with non-actionable leads.
+        continue;
       }
+
+      // Skip portal fragment titles
+      if (isPortalFragmentTitle(title)) continue;
 
       // Classify, extract dates/budget
       const { leadClass, status } = classifyLeadType(context, matchedTerms);
       const dates = extractDatesFromContext(context);
       const budget = extractBudgetFromContext(context);
+
+      // Architectural scope gate
+      const mktSector = inferMarketSector(context, taxonomy);
+      if (!hasArchitecturalScope(context, mktSector)) continue;
 
       leads.push({
         title,
@@ -589,7 +666,7 @@ function ruleBasedExtraction(content, source, matchedTerms) {
           ? `Active solicitation from ${source.category || 'source'} in ${source.geography || 'Montana'}. May require A/E response.`
           : `Project signal from ${source.category || 'source'} in ${source.geography || 'Montana'}.`,
         location: source.geography ? `${source.geography}, MT` : 'Montana',
-        marketSector: inferMarketSector(context),
+        marketSector: inferMarketSector(context, taxonomy),
         projectType: inferProjectType(context),
         signalStrength: leadClass === 'active_solicitation' ? 'strong' : (matchedTerms.length > 3 ? 'medium' : 'weak'),
         leadClass, status,
@@ -642,9 +719,27 @@ function generateTitleFromContext(context, source) {
 
 /**
  * Infer market sector from content.
- * Improved: more specific patterns checked first.
+ * Checks market taxonomy keywords first, then falls back to hardcoded patterns.
  */
-function inferMarketSector(text) {
+function inferMarketSector(text, taxonomy) {
+  // Try market taxonomy first
+  if (taxonomy && Array.isArray(taxonomy)) {
+    const marketItems = taxonomy.filter(t => t.taxonomy_group === 'market' && t.status === 'active' && t.include_keywords.length > 0);
+    const lower = text.toLowerCase();
+    let bestMatch = null;
+    let bestHits = 0;
+    for (const item of marketItems) {
+      const hits = item.include_keywords.filter(kw => lower.includes(kw.toLowerCase())).length;
+      const excludeHit = item.exclude_keywords.length > 0 && item.exclude_keywords.some(kw => lower.includes(kw.toLowerCase()));
+      if (hits > bestHits && !excludeHit) {
+        bestMatch = item.label;
+        bestHits = hits;
+      }
+    }
+    if (bestMatch) return bestMatch;
+  }
+
+  // Fallback to hardcoded patterns
   const lower = text.toLowerCase();
   if (/\b(elementary|middle school|high school|classroom|gymnasium|school district|k-12)\b/.test(lower)) return 'K-12';
   if (/\b(university|college|campus|dormitor|student housing|higher ed)\b/.test(lower)) return 'Higher Education';
@@ -729,6 +824,7 @@ function buildLeadRecord(candidate) {
     asanaUrl: null,
     reasonNotPursued: null,
     dateNotPursued: null,
+    taxonomyMatches: candidate.taxonomyMatches || [],
     evidence: [],
   };
 }

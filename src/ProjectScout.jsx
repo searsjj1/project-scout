@@ -610,12 +610,22 @@ function healthDot(health) {
    SCORE RING COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 
-function ScoreRing({ score, size = 44, strokeWidth = 3.5, label }) {
+// v4-b12: Score context label — helps reviewer interpret the number
+function scoreContextLabel(score) {
+  if (score >= 70) return 'Strong';
+  if (score >= 50) return 'Moderate';
+  if (score >= 35) return 'Review';
+  return 'Low';
+}
+
+function ScoreRing({ score, size = 44, strokeWidth = 3.5, label, showContext = false }) {
   const r = (size - strokeWidth) / 2;
   const circ = 2 * Math.PI * r;
   const offset = circ - (score / 100) * circ;
+  const contextLabel = showContext ? scoreContextLabel(score) : null;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
+      title={`Relevance: ${score}/100 — ${scoreContextLabel(score)}. Strong (70+): high-confidence A&E opportunity. Moderate (50-69): likely relevant. Review (35-49): may need verification. Low (<35): weak signal.`}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
         <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth={strokeWidth} />
         <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={scoreColor(score)} strokeWidth={strokeWidth}
@@ -625,7 +635,11 @@ function ScoreRing({ score, size = 44, strokeWidth = 3.5, label }) {
       <span style={{ position: 'relative', top: -(size/2 + 6), fontSize: 12, fontWeight: 700, color: scoreColor(score), height: 0 }}>
         {score}
       </span>
-      {label && <span style={{ fontSize: 9, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: -2 }}>{label}</span>}
+      {contextLabel ? (
+        <span style={{ fontSize: 9, color: scoreColor(score), textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: -2, fontWeight: 600 }}>{contextLabel}</span>
+      ) : label ? (
+        <span style={{ fontSize: 9, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: -2 }}>{label}</span>
+      ) : null}
     </div>
   );
 }
@@ -695,21 +709,47 @@ function UrgencyRing({ dueDate, size = 44, strokeWidth = 3.5 }) {
    LEAD CARD COMPONENT
    ═══════════════════════════════════════════════════════════════ */
 
-function LeadCard({ lead, onClick, style: animStyle }) {
+// v4-b11: Lead-class label for card display — distinguishes RFPs from strategic districts from news
+function getLeadClassLabel(lead) {
+  if (lead.leadClass === 'active_solicitation') return { label: 'Active RFP', bg: '#dcfce7', fg: '#166534' };
+  if (lead.leadClass === 'strategic_watch') return { label: 'Strategic District', bg: '#e0e7ff', fg: '#3730a3' };
+  if (lead.watchCategory === 'tif_district' || lead.watchCategory === 'redevelopment_area') return { label: 'Redevelopment', bg: '#e0e7ff', fg: '#3730a3' };
+  if (lead.watchCategory === 'capital_budget') return { label: 'Capital Budget', bg: '#fef3c7', fg: '#92400e' };
+  if (lead.watchCategory === 'development_program') return { label: 'Development', bg: '#dbeafe', fg: '#1e40af' };
+  if (lead.dashboard_lane === 'news' || /news|media|contractor/i.test(lead.sourceName || '')) return { label: 'News', bg: '#f1f5f9', fg: '#475569' };
+  return null;
+}
+
+// v4-b11: Clean HTML entities in display text
+function cleanHtmlEntities(text) {
+  if (!text) return text;
+  return text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&mdash;/g, '—').replace(/&ndash;/g, '–');
+}
+
+// v4-b11: Strip "Source: X" suffix from description for cleaner card display
+function cleanDescriptionForCard(desc) {
+  if (!desc) return desc;
+  return desc.replace(/\s*—\s*Source:\s*[^.]+\.?\s*$/, '').trim();
+}
+
+function LeadCard({ lead, onClick, style: animStyle, batchMode, batchSelected, onBatchToggle }) {
   const { primary, isNew, isUpdated } = getOperationalStatus(lead);
   const badge = statusBadge(primary);
   const discovered = daysAgo(lead.dateDiscovered);
   const isFav = !!lead.favorite;
   const reassess = isReassessActive(lead);
   const highlight = reassess ? 'reassess' : isNew ? 'new' : isUpdated ? 'updated' : isFav ? 'favorite' : 'none';
+  const classLabel = getLeadClassLabel(lead);
+  const isSelected = !!(batchMode && batchSelected && batchSelected.has(lead.id));
   const borderColor = highlight === 'reassess' ? '#f59e0b' : highlight === 'new' ? '#93c5fd' : highlight === 'updated' ? '#a78bfa' : highlight === 'favorite' ? '#fbbf24' : '#eef0f4';
   const shadowColor = highlight === 'reassess' ? 'rgba(245,158,11,0.10)' : highlight === 'new' ? 'rgba(59,130,246,0.08)' : highlight === 'updated' ? 'rgba(139,92,246,0.08)' : highlight === 'favorite' ? 'rgba(251,191,36,0.08)' : 'rgba(0,0,0,0.03)';
 
   return (
-    <div onClick={onClick} style={{
-      background: '#fff', borderRadius: 14, padding: '20px 22px', cursor: 'pointer',
-      border: `1px solid ${borderColor}`, transition: 'all 0.22s cubic-bezier(.4,0,.2,1)',
-      boxShadow: `0 1px 4px ${shadowColor}, 0 1px 6px rgba(0,0,0,0.02)`,
+    <div onClick={batchMode ? () => onBatchToggle?.(lead.id) : onClick} style={{
+      background: isSelected ? '#f0f9ff' : '#fff', borderRadius: 14, padding: '20px 22px', cursor: 'pointer',
+      border: `1px solid ${isSelected ? '#3b82f6' : borderColor}`, transition: 'all 0.22s cubic-bezier(.4,0,.2,1)',
+      boxShadow: isSelected ? '0 0 0 2px rgba(59,130,246,0.15)' : `0 1px 4px ${shadowColor}, 0 1px 6px rgba(0,0,0,0.02)`,
+      position: 'relative',
       ...animStyle,
     }}
     onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)'; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = '#dde1e8'; }}
@@ -719,8 +759,19 @@ function LeadCard({ lead, onClick, style: animStyle }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {batchMode && (
+              <div style={{
+                width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                border: `2px solid ${isSelected ? '#3b82f6' : '#cbd5e1'}`,
+                background: isSelected ? '#3b82f6' : '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.15s ease',
+              }}>
+                {isSelected && <span style={{ color: '#fff', fontSize: 11, fontWeight: 800, lineHeight: 1 }}>✓</span>}
+              </div>
+            )}
             {isFav && <Star size={14} style={{ color: '#f59e0b', fill: '#f59e0b', flexShrink: 0 }} />}
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0, lineHeight: 1.35, letterSpacing: '-0.01em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={lead.title}>{getWatchDisplayTitle(lead)}</h3>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0, lineHeight: 1.35, letterSpacing: '-0.01em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={lead.title}>{cleanHtmlEntities(getWatchDisplayTitle(lead))}</h3>
           </div>
           <p style={{ fontSize: 12.5, color: '#64748b', margin: '3px 0 0', fontWeight: 500 }}>{lead.owner}</p>
         </div>
@@ -757,6 +808,13 @@ function LeadCard({ lead, onClick, style: animStyle }) {
             fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
             background: badge.bg, color: badge.fg, whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: '0.04em',
           }}>{badge.label}</span>
+          {classLabel && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+              background: classLabel.bg, color: classLabel.fg,
+              letterSpacing: '0.03em', whiteSpace: 'nowrap',
+            }}>{classLabel.label}</span>
+          )}
         </div>
         {lead.leadOrigin === 'manual' && (
           <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
@@ -804,37 +862,52 @@ function LeadCard({ lead, onClick, style: animStyle }) {
 
       {/* Meta row */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginBottom: 14, fontSize: 11.5, color: '#94a3b8' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{lead.location}</span>
+        {lead.location && lead.location !== 'Montana' && <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><MapPin size={11} />{lead.location}</span>}
         <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Building2 size={11} />{lead.marketSector}</span>
-        {lead.projectType && <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Layers size={11} />{lead.projectType}</span>}
+        {lead.projectType && lead.projectType !== 'Other' && <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Layers size={11} />{lead.projectType}</span>}
+        {lead.sourceName && (lead.sourceUrl ? (
+          <a href={lead.sourceUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#93a3b8', textDecoration: 'none', fontSize: 11.5 }}
+            title={`Open source: ${lead.sourceName}`}
+            onMouseEnter={e => { e.currentTarget.style.color = '#3b82f6'; e.currentTarget.style.textDecoration = 'underline'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#93a3b8'; e.currentTarget.style.textDecoration = 'none'; }}>
+            <FileText size={10} />{lead.sourceName.length > 35 ? lead.sourceName.slice(0, 33) + '…' : lead.sourceName}
+          </a>
+        ) : (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, color: '#b0b8c7' }}><FileText size={10} />{lead.sourceName.length > 35 ? lead.sourceName.slice(0, 33) + '…' : lead.sourceName}</span>
+        ))}
       </div>
 
-      {/* Description — prefer whyItMatters for concise card display, fallback to description */}
+      {/* v4-b12: Description — show best available content, clean and non-repetitive */}
       <p style={{ fontSize: 11.5, lineHeight: 1.5, color: '#64748b', margin: '0 0 12px', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
         {(() => {
-          // Use whyItMatters if it's a better card-level summary than the raw description
-          const wim = lead.whyItMatters || '';
-          const desc = lead.description || '';
-          // If whyItMatters is reasonably short and different from the title, prefer it
-          if (wim.length > 30 && wim.length < 300 && wim.toLowerCase() !== (lead.title || '').toLowerCase()) return wim;
-          // Otherwise clean up the description
-          if (desc.length > 0) {
-            // Strip repeated title text from description start
-            const titleLo = (lead.title || '').toLowerCase().slice(0, 40);
-            let clean = desc;
-            if (clean.toLowerCase().startsWith(titleLo) && clean.length > titleLo.length + 20) {
-              clean = clean.slice(titleLo.length).replace(/^\s*[.—–-]\s*/, '').trim();
-            }
-            return clean || desc;
+          const desc = cleanDescriptionForCard(cleanHtmlEntities(lead.description || ''));
+          const wim = cleanHtmlEntities(lead.whyItMatters || '');
+          const titleLo = (lead.title || '').toLowerCase().slice(0, 40);
+
+          // Clean description: strip repeated title text from start
+          let cleanDesc = desc;
+          if (cleanDesc && cleanDesc.toLowerCase().startsWith(titleLo) && cleanDesc.length > titleLo.length + 20) {
+            cleanDesc = cleanDesc.slice(titleLo.length).replace(/^\s*[.—–-]\s*/, '').trim();
           }
-          return desc || 'No description available';
+
+          // Prefer description if it has real project substance (budget, scope, named details)
+          // whyItMatters is often generic boilerplate from the backend template
+          const descHasSubstance = cleanDesc && cleanDesc.length > 40 &&
+            /\$[\d,.]+|\d+\s*(acres?|sf|gsf|units?|square|phase|floor|million)|budget|construction|renovation|funded|approved/i.test(cleanDesc);
+
+          if (descHasSubstance) return cleanDesc;
+          // Use whyItMatters if it's concise and adds value
+          if (wim.length > 30 && wim.length < 250 && wim.toLowerCase() !== titleLo) return wim;
+          // Fallback to whatever description we have
+          return cleanDesc || wim || 'No description available';
         })()}
       </p>
 
       {/* Scores + Budget/Timeline */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: 14 }}>
-          <ScoreRing score={lead.relevanceScore || 0} label="Relevance" />
+          <ScoreRing score={lead.relevanceScore || 0} showContext />
           {lead.action_due_date ? (
             <UrgencyRing dueDate={lead.action_due_date} />
           ) : (lead.potentialTimeline || lead.action_due_date) ? (
@@ -1200,8 +1273,9 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
               {isFav && <Star size={13} style={{ color: '#f59e0b', fill: '#f59e0b' }} />}
               {opIsNew && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>NEW</span>}
               <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6, background: badge.bg, color: badge.fg, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{badge.label}</span>
+              {(() => { const cl = getLeadClassLabel(lead); return cl ? <span style={{ fontSize: 9.5, fontWeight: 600, padding: '2px 7px', borderRadius: 5, background: cl.bg, color: cl.fg }}>{cl.label}</span> : null; })()}
               {lead.marketSector && <span style={{ fontSize: 10, padding: '3px 7px', borderRadius: 5, background: '#f1f5f9', color: '#64748b' }}>{lead.marketSector}</span>}
-              {lead.projectType && <span style={{ fontSize: 10, padding: '3px 7px', borderRadius: 5, background: '#f1f5f9', color: '#64748b' }}>{lead.projectType}</span>}
+              {lead.projectType && lead.projectType !== 'Other' && <span style={{ fontSize: 10, padding: '3px 7px', borderRadius: 5, background: '#f1f5f9', color: '#64748b' }}>{lead.projectType}</span>}
             </div>
             {/* ── Inline title editing ── */}
             {editingTitle ? (
@@ -1224,7 +1298,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, margin: '0 0 3px' }}>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: lead.no_go ? '#991b1b' : '#0f172a', margin: 0, letterSpacing: '-0.02em', lineHeight: 1.3, flex: 1 }}>{getDisplayTitle(lead)}</h2>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: lead.no_go ? '#991b1b' : '#0f172a', margin: 0, letterSpacing: '-0.02em', lineHeight: 1.3, flex: 1 }}>{cleanHtmlEntities(getDisplayTitle(lead))}</h2>
                 <button onClick={() => { setTitleDraft(getDisplayTitle(lead)); setEditingTitle(true); }} title="Edit title"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: '#94a3b8', flexShrink: 0, marginTop: 2 }}><Edit3 size={14} /></button>
               </div>
@@ -1402,15 +1476,21 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 14px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
               <DetailField icon={<Building2 size={13} />} label="Owner" value={editing ? <input style={fieldInput} value={form.owner} onChange={e => set('owner', e.target.value)} /> : (lead.owner || '—')} />
               <DetailField icon={<MapPin size={13} />} label="Location" value={editing ? <input style={fieldInput} value={form.location} onChange={e => set('location', e.target.value)} /> : (lead.location || '—')} />
-              <DetailField icon={<DollarSign size={13} />} label="Budget" value={editing ? <input style={fieldInput} value={form.potentialBudget} onChange={e => set('potentialBudget', e.target.value)} /> : (lead.potentialBudget || '—')} />
-              <DetailField icon={<Calendar size={13} />} label="Timeline" value={editing ? <input style={fieldInput} value={form.potentialTimeline} onChange={e => set('potentialTimeline', e.target.value)} /> : (formatTimeline(lead))} />
-              <DetailField icon={<Globe size={13} />} label="Source" value={lead.sourceName || '—'} />
+              {(editing || lead.potentialBudget) && <DetailField icon={<DollarSign size={13} />} label="Budget" value={editing ? <input style={fieldInput} value={form.potentialBudget} onChange={e => set('potentialBudget', e.target.value)} /> : (lead.potentialBudget || '—')} />}
+              {(editing || lead.potentialTimeline || lead.action_due_date) && <DetailField icon={<Calendar size={13} />} label="Timeline" value={editing ? <input style={fieldInput} value={form.potentialTimeline} onChange={e => set('potentialTimeline', e.target.value)} /> : (formatTimeline(lead))} />}
+              <DetailField icon={<Globe size={13} />} label="Source" value={lead.sourceUrl ? (
+                <a href={lead.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'none', fontSize: 12 }}
+                  onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                  onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                  {lead.sourceName || 'View Source'}
+                </a>
+              ) : (lead.sourceName || '—')} />
               <DetailField icon={<Clock size={13} />} label="Discovered" value={formatDate(lead.dateDiscovered)} />
             </div>
 
             {/* Relevance + urgency — compact row */}
             <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'center', padding: '4px 0' }}>
-              <ScoreRing score={lead.relevanceScore || 0} size={48} strokeWidth={3.5} label="Relevance" />
+              <ScoreRing score={lead.relevanceScore || 0} size={48} strokeWidth={3.5} showContext />
               {lead.action_due_date ? (
                 <UrgencyRing dueDate={lead.action_due_date} size={48} strokeWidth={3.5} />
               ) : null}
@@ -1503,11 +1583,59 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                   </div>
                 )}
 
+                {/* v4-b11/b12: Artifact path and evidence snippet — BD trust context */}
+                {lead.evidenceSummary && (() => {
+                  const evSum = cleanHtmlEntities(lead.evidenceSummary || '');
+                  const pathMatch = evSum.match(/Artifact path:\s*([^.]+)/);
+                  const artifactPath = pathMatch ? pathMatch[1].trim() : null;
+                  const findingMatch = evSum.match(/Key finding:\s*([^.]+(?:\.[^.]+)?)/);
+                  const keyFinding = findingMatch ? findingMatch[1].trim().slice(0, 180) : null;
+                  const fundingMatch = evSum.match(/(?:Funding|Budget):\s*([^.]+)/);
+                  const funding = fundingMatch ? fundingMatch[1].trim() : lead.potentialBudget;
+                  // v4-b12: Best artifact URL for clickable path
+                  const artifactUrl = lead.evidenceLinks?.[0] || lead.evidenceSourceLinks?.[0]?.url || lead.sourceUrl || null;
+
+                  return (artifactPath || keyFinding) ? (
+                    <div style={{ padding: '10px 14px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', marginBottom: 0 }}>
+                      {artifactPath && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: keyFinding ? 6 : 0 }}>
+                          <FileText size={12} style={{ color: '#16a34a', flexShrink: 0 }} />
+                          {artifactUrl ? (
+                            <a href={artifactUrl} target="_blank" rel="noopener noreferrer"
+                              style={{ fontSize: 11, fontWeight: 600, color: '#166534', textDecoration: 'none' }}
+                              title="Open supporting artifact"
+                              onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                              onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}>
+                              {artifactPath.split('→').map((p, i, arr) => (
+                                <span key={i}>{p.trim()}{i < arr.length - 1 && <span style={{ color: '#86efac', margin: '0 4px' }}>→</span>}</span>
+                              ))}
+                            </a>
+                          ) : (
+                            <span style={{ fontSize: 11, fontWeight: 600, color: '#166534' }}>
+                              {artifactPath.split('→').map((p, i, arr) => (
+                                <span key={i}>{p.trim()}{i < arr.length - 1 && <span style={{ color: '#86efac', margin: '0 4px' }}>→</span>}</span>
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {keyFinding && (
+                        <p style={{ fontSize: 11, color: '#475569', margin: 0, lineHeight: 1.5 }}>
+                          {keyFinding}
+                        </p>
+                      )}
+                      {funding && !lead.potentialBudget && (
+                        <p style={{ fontSize: 11, fontWeight: 600, color: '#166534', margin: '4px 0 0' }}>{funding}</p>
+                      )}
+                    </div>
+                  ) : null;
+                })()}
+
                 {/* v31c: Consolidated Watch summary — fewer boxes, more decision-useful */}
                 <DetailSection title="Project Summary">
-                  <p style={detailText}>{editing ? <textarea style={fieldTextarea} value={form.description} onChange={e => set('description', e.target.value)} /> : (lead.description || generateWatchSummary(lead))}</p>
+                  <p style={detailText}>{editing ? <textarea style={fieldTextarea} value={form.description} onChange={e => set('description', e.target.value)} /> : cleanHtmlEntities(cleanDescriptionForCard(lead.description || generateWatchSummary(lead)))}</p>
                   {lead.whyItMatters && !editing && (
-                    <p style={{ ...detailText, color: '#475569', marginTop: 8, fontStyle: 'italic' }}>{lead.whyItMatters}</p>
+                    <p style={{ ...detailText, color: '#475569', marginTop: 8, fontStyle: 'italic' }}>{cleanHtmlEntities(lead.whyItMatters)}</p>
                   )}
                 </DetailSection>
 
@@ -1568,11 +1696,29 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                     </div>
                   </div>
                 )}
+                {/* v4-b11: Artifact path for active leads */}
+                {lead.evidenceSummary && (() => {
+                  const evSum = cleanHtmlEntities(lead.evidenceSummary || '');
+                  const pathMatch = evSum.match(/Artifact path:\s*([^.]+)/);
+                  const artifactPath = pathMatch ? pathMatch[1].trim() : null;
+                  return artifactPath ? (
+                    <div style={{ padding: '8px 14px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <FileText size={12} style={{ color: '#16a34a', flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#166534' }}>
+                          {artifactPath.split('→').map((p, i, arr) => (
+                            <span key={i}>{p.trim()}{i < arr.length - 1 && <span style={{ color: '#86efac', margin: '0 4px' }}>→</span>}</span>
+                          ))}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
                 {/* Project summary */}
                 <DetailSection title="Project Summary">
-                  <p style={detailText}>{editing ? <textarea style={fieldTextarea} value={form.description} onChange={e => set('description', e.target.value)} /> : (lead.description || '—')}</p>
+                  <p style={detailText}>{editing ? <textarea style={fieldTextarea} value={form.description} onChange={e => set('description', e.target.value)} /> : cleanHtmlEntities(cleanDescriptionForCard(lead.description || '—'))}</p>
                   {lead.whyItMatters && !editing && (
-                    <p style={{ ...detailText, color: '#475569', marginTop: 8, fontStyle: 'italic' }}>{lead.whyItMatters}</p>
+                    <p style={{ ...detailText, color: '#475569', marginTop: 8, fontStyle: 'italic' }}>{cleanHtmlEntities(lead.whyItMatters)}</p>
                   )}
                 </DetailSection>
                 {/* Scout Assessment */}
@@ -2189,7 +2335,7 @@ function StatsBar({ leads }) {
    TAB: ACTIVE LEADS
    ═══════════════════════════════════════════════════════════════ */
 
-function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead }) {
+function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead, batchMode, batchSelected, toggleBatchSelect, setBatchMode, setBatchSelected }) {
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [geoFilter, setGeoFilter] = useState('all');
@@ -2297,6 +2443,16 @@ function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead }) {
           <option value="duedate">Within Group: Action Due</option>
           <option value="budget">Within Group: Budget</option>
         </select>
+        {/* v4-b12: Batch triage toggle */}
+        <button onClick={() => { setBatchMode(!batchMode); setBatchSelected(new Set()); }}
+          style={{
+            padding: '6px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            background: batchMode ? '#0f172a' : '#f1f5f9', color: batchMode ? '#fff' : '#64748b',
+            border: batchMode ? '1px solid #0f172a' : '1px solid #e2e8f0',
+            transition: 'all 0.15s ease',
+          }}>
+          {batchMode ? `Select (${batchSelected?.size || 0})` : 'Batch'}
+        </button>
       </div>
 
       {/* ═══ ACTIVE SECTION ═══ */}
@@ -2312,17 +2468,18 @@ function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <Activity size={16} style={{ color: '#065f46' }} />
-                <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>Active</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>Active Pursuits</h2>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#d1fae5', color: '#065f46' }}>{activeFiltered.length}</span>
               </div>
               <div style={{ flex: 1, height: 1, background: '#e2e8f0', marginLeft: 4 }} />
-              <span style={{ fontSize: 10.5, color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap' }}>Current actionable pursuits, RFQs, RFPs, active solicitations</span>
+              <span style={{ fontSize: 10.5, color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap' }}>Formally active solicitations and in-flight pursuits</span>
             </div>
 
             {activeFiltered.length > 0 ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14, marginBottom: 8 }}>
                 {activeFiltered.map((lead, i) => (
                   <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)}
+                    batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
                     style={{ animationDelay: `${i * 0.04}s`, animation: 'fadeUp 0.35s ease both' }}
                   />
                 ))}
@@ -2333,60 +2490,124 @@ function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead }) {
               </div>
             )}
 
-            {/* ═══ WATCH SECTION ═══ */}
-            <div style={{ marginTop: 32, marginBottom: 14 }}>
-              {/* Visual divider */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <Eye size={16} style={{ color: '#92400e' }} />
-                  <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>Watch</h2>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#fef3c7', color: '#92400e' }}>{watchVisible.length}</span>
-                </div>
-                <div style={{ flex: 1, height: 1, background: '#e2e8f0', marginLeft: 4 }} />
-                {hiddenWatchCount > 0 && (
-                  <button onClick={() => setShowHidden(!showHidden)} style={{
-                    display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6,
-                    border: '1px solid #e2e8f0', background: showHidden ? '#f1f5f9' : '#fff',
-                    cursor: 'pointer', fontSize: 10.5, fontWeight: 600, color: '#94a3b8',
-                    transition: 'all 0.15s',
-                  }}>
-                    {showHidden ? <EyeOff size={12} /> : <Eye size={12} />}
-                    {showHidden ? 'Hide' : 'Show'} {hiddenWatchCount} muted/dismissed
-                  </button>
-                )}
-                <span style={{ fontSize: 10.5, color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap' }}>Future opportunities, districts, programs, capital planning</span>
-              </div>
-              <p style={{ fontSize: 11.5, color: '#94a3b8', margin: '6px 0 0 23px', lineHeight: 1.5 }}>
-                Named future opportunities, redevelopment areas, districts, development programs, and project generators that may later branch into actionable pursuits.
-              </p>
-            </div>
+            {/* ═══ WATCH SECTION — sub-grouped by dashboard_lane ═══ */}
+            {(() => {
+              // Retroactive lane inference for leads that predate dashboard_lane being written to lead objects
+              const getEffectiveLane = (lead) => {
+                if (lead.dashboard_lane) {
+                  // v4-b6: Content-aware lane override — a news lead about a specific
+                  // RFQ/RFP/solicitation should route to active_leads, not news
+                  if (lead.dashboard_lane === 'news') {
+                    const tlo = (lead.title || '').toLowerCase();
+                    if (/\b(rfq|rfp|solicitation|invitation\s+to\s+bid|request\s+for\s+(qualifications?|proposals?))\b/i.test(tlo)) return 'active_leads';
+                    // News about a specific development area → development_potentials
+                    if (/\b(redevelopment|urban\s+renewal|tif\s+district|urd|master\s+plan|feasibility\s+study|site\s+selection|rezoning|annexation)\b/i.test(tlo) &&
+                        !/\b(rfq|rfp|solicitation|bid)\b/i.test(tlo)) return 'development_potentials';
+                  }
+                  return lead.dashboard_lane;
+                }
+                const srcName = (lead.sourceName || lead.sourceId || '').toLowerCase();
+                // News/media sources → news lane (but not contractor portfolio pages)
+                if (/missoulian|kpax|nbcmontana|mtpr|montanan|media|news|current/i.test(srcName) && !/contractor|langlas|dac|jackson|quality|martel/i.test(srcName)) return 'news';
+                // Contractor portfolio → news lane
+                if (/contractor|langlas|dac|jackson|quality|martel/i.test(srcName)) return 'news';
+                // MRA, MEP, economic partnership, redevelopment → development potentials
+                if (/\bmra\b|redevelopment|urban\s*renewal|\bmep\b|economic\s*partner|missoula\s*economic/i.test(srcName)) return 'development_potentials';
+                // Housing authority → development potentials (if project-related)
+                if (/housing\s*authority/i.test(srcName)) return 'development_potentials';
+                // Infer from marketSector if present
+                const sector = (lead.marketSector || '').toLowerCase();
+                if (/economic\s*dev|redevelopment|urban\s*renewal/i.test(sector)) return 'development_potentials';
+                if (/media|news|press/i.test(sector)) return 'news';
+                return 'active_leads';
+              };
+              // Split watch leads into lane sub-groups
+              const watchProjectLeads = watchFiltered.filter(l => getEffectiveLane(l) === 'active_leads');
+              const watchDevPotentials = watchFiltered.filter(l => getEffectiveLane(l) === 'development_potentials');
+              const watchNews = watchFiltered.filter(l => getEffectiveLane(l) === 'news');
 
-            {watchFiltered.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14, padding: '16px', background: '#fefdf8', borderRadius: 14, border: '1px solid #fde68a40' }}>
-                {watchFiltered.map((lead, i) => {
-                  const disp = getWatchDisposition(lead);
-                  const isHiddenItem = disp === WATCH_DISPOSITION.MUTED || disp === WATCH_DISPOSITION.DISMISSED;
-                  return (
-                    <div key={lead.id} style={{ position: 'relative', opacity: isHiddenItem && !isReassessActive(lead) ? 0.55 : 1 }}>
-                      {isHiddenItem && (
-                        <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 2, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-                          background: disp === WATCH_DISPOSITION.MUTED ? '#f1f5f9' : '#fee2e2',
-                          color: disp === WATCH_DISPOSITION.MUTED ? '#64748b' : '#dc2626',
-                          textTransform: 'uppercase', letterSpacing: '0.04em',
-                        }}>{disp === WATCH_DISPOSITION.MUTED ? 'MUTED' : 'DISMISSED'}</div>
-                      )}
-                      <LeadCard lead={lead} onClick={() => onSelectLead(lead)}
-                        style={{ animationDelay: `${(activeFiltered.length + i) * 0.04}s`, animation: 'fadeUp 0.35s ease both' }}
-                      />
+              const LaneSubSection = ({ icon, title, color, bg, borderColor, leads: laneleads, emptyLabel }) => {
+                if (laneleads.length === 0) return null;
+                return (
+                  <div style={{ marginTop: 28 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {icon}
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{title}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8, background: bg, color }}>{laneleads.length}</span>
+                      </div>
+                      <div style={{ flex: 1, height: 1, background: borderColor || '#e2e8f0' }} />
                     </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '28px 20px', color: '#94a3b8', background: '#fefdf8', borderRadius: 12, border: '1px dashed #fde68a', marginBottom: 8 }}>
-                <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>No watch items match your filters</p>
-              </div>
-            )}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14, padding: '14px', background: bg + '30', borderRadius: 12, border: `1px solid ${borderColor || '#e2e8f0'}40` }}>
+                      {laneleads.map((lead, i) => {
+                        const disp = getWatchDisposition(lead);
+                        const isHiddenItem = disp === WATCH_DISPOSITION.MUTED || disp === WATCH_DISPOSITION.DISMISSED;
+                        return (
+                          <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)}
+                            batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
+                            style={{ opacity: isHiddenItem ? 0.5 : 1, animationDelay: `${i * 0.04}s`, animation: 'fadeUp 0.35s ease both' }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <>
+                  <div style={{ marginTop: 32, marginBottom: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <Eye size={16} style={{ color: '#92400e' }} />
+                        <h2 style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>Intelligence Board</h2>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: '#fef3c7', color: '#92400e' }}>{watchVisible.length}</span>
+                      </div>
+                      <div style={{ flex: 1, height: 1, background: '#e2e8f0', marginLeft: 4 }} />
+                      <span style={{ fontSize: 10.5, color: '#94a3b8', fontWeight: 500, whiteSpace: 'nowrap' }}>Missoula County early-warning intelligence</span>
+                      {hiddenWatchCount > 0 && (
+                        <button onClick={() => setShowHidden(!showHidden)} style={{
+                          display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 6,
+                          border: '1px solid #e2e8f0', background: showHidden ? '#f1f5f9' : '#fff',
+                          cursor: 'pointer', fontSize: 10.5, fontWeight: 600, color: '#94a3b8',
+                          transition: 'all 0.15s',
+                        }}>
+                          {showHidden ? <EyeOff size={12} /> : <Eye size={12} />}
+                          {showHidden ? 'Hide' : 'Show'} {hiddenWatchCount} muted/dismissed
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Lane order: Development/Project Potentials → News → Active Project Leads */}
+                  <LaneSubSection
+                    icon={<MapPin size={13} style={{ color: '#1d4ed8' }} />}
+                    title="Development / Project Potentials"
+                    color="#1d4ed8" bg="#dbeafe" borderColor="#93c5fd"
+                    leads={watchDevPotentials}
+                  />
+                  <LaneSubSection
+                    icon={<Radio size={13} style={{ color: '#0f766e' }} />}
+                    title="Missoula News"
+                    color="#0f766e" bg="#ccfbf1" borderColor="#5eead4"
+                    leads={watchNews}
+                  />
+                  <LaneSubSection
+                    icon={<Activity size={13} style={{ color: '#065f46' }} />}
+                    title="Active Project Leads"
+                    color="#065f46" bg="#d1fae5" borderColor="#6ee7b7"
+                    leads={watchProjectLeads}
+                  />
+
+                  {watchFiltered.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '28px 20px', color: '#94a3b8', background: '#fafbfc', borderRadius: 12, border: '1px dashed #e2e8f0', marginTop: 8 }}>
+                      <p style={{ fontSize: 13, fontWeight: 500, margin: '0 0 4px' }}>No Missoula County intelligence signals yet</p>
+                      <p style={{ fontSize: 11.5, margin: 0 }}>Run a scan against Missoula County sources to populate Development Potentials, News, and Active Project Leads</p>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {filtered.length === 0 && (
               <div style={{ textAlign: 'center', padding: '60px 20px', color: '#94a3b8' }}>
@@ -4799,7 +5020,7 @@ const PIF_FORM_URL = 'https://form.asana.com/?k=IUr_D0wx9ZOZGXfSY9okag&d=8691588
    ═══════════════════════════════════════════════════════════════ */
 
 const TABS = [
-  { id: 'active', label: 'Active / Watch', icon: <Activity size={15} /> },
+  { id: 'active', label: 'Board', icon: <Activity size={15} /> },
   { id: 'asana', label: 'Asana \u2013 Pending / Go', icon: <Send size={15} /> },
   { id: 'notpursued', label: 'Not Pursued / Asana No\u2011Go', icon: <Archive size={15} /> },
   { id: 'registry', label: 'Source Registry', icon: <Database size={15} /> },
@@ -4854,6 +5075,8 @@ function translatePruneReason(reason, lead) {
   // Near duplicate
   if (r.startsWith('near_duplicate_district:')) return { label: 'Duplicate district reference', explanation: `This district/area appears to duplicate another strategic watch item already on the board: "${reason.split(':').slice(1).join(':')?.trim() || ''}". Multiple sources may reference the same district.`, keepHint: 'Prune if the existing district item already covers this area. Keep if this reference adds materially different project information.' };
   if (r.startsWith('near_duplicate_of:')) return { label: 'Near-duplicate of existing lead', explanation: `This lead appears very similar to another item already on the board: "${reason.split(':').slice(1).join(':')?.trim() || ''}".`, keepHint: 'Keep if these are actually different projects despite similar names.' };
+  // v4-b6: Weak news lead
+  if (r === 'weak_news_no_signal') return { label: 'News — no A&E project signal', explanation: 'This news-lane lead does not contain development, construction, building, or facility signals relevant to A&E business development. It may be generic civic news, opinion, or lifestyle content.', keepHint: 'Keep if the article actually discusses a specific construction, development, or facility project.' };
   // Container/listing page
   if (r === 'container_parent_page') return { label: 'Parent listing page — not a project', explanation: 'This is a bid solicitations, program, or listing page that contains child solicitations. The actual projects are the individual items listed on this page, not the page itself.', keepHint: 'Prune unless no child solicitations have been extracted.' };
   // Generic fallback
@@ -5148,6 +5371,39 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
     // Completed/existing project references
     if (/\b(project\s+complet(?:ed|ion)|construction\s+complet(?:ed|ion)|was\s+completed|ribbon\s+cutting|grand\s+opening)\b/i.test(lo) &&
         !/\b(new\s+phase|phase\s+[2-9]|next\s+phase|upcoming|expansion)\b/i.test(lo)) return true;
+    // ── v4-b6r2: Real-scan-driven noise patterns ──
+    // School admin content
+    if (/\b(scholarships?|school\s+supplies|transfer\s+information|student\s+data\s+privacy|student\s+forms|suicide\s+prevention|safe\s+firearm|traffic\s+education|volunteer\s+resources)\b/i.test(lo) &&
+        !/\b(renovation|construction|design|rfq|rfp|addition|replacement|upgrade|building\s+project)\b/i.test(lo)) return true;
+    // Recreation programs
+    if (/\b(afterschool|after.?school|ropes?\s+course|team\s+building|summer\s+camp|folf|tennis\s+rx|trails?\s+shuttle|recreation\s+guide|sports?\s+turf\s+dashboard|resident\s+discount)\b/i.test(lo) &&
+        !/\b(renovation|construction|design|rfq|rfp|addition|replacement|facility\s+(design|renovation|construction)|building)\b/i.test(lo)) return true;
+    // Permit fee schedules
+    if (/\b(fire\s+inspection\s+and\s+plan\s+check\s+fees|permit\s+fees?|fee\s+schedule|inspection\s+fees)\b/i.test(lo) &&
+        !/\b(renovation|construction|design|rfq|rfp|project|building\s+project)\b/i.test(lo)) return true;
+    // IT/Website modernization
+    if (/\bwebsite\s+(modernization|redesign|replacement|upgrade|migration|overhaul)\b/i.test(lo) &&
+        !/\b(architect|building|facility|a\/e|design\s+services)\b/i.test(lo)) return true;
+    // Facility rental / wedding venue
+    if (/\b(rent\s+a\s+(county|city|town)\s+facility|get\s+married\s+at)\b/i.test(lo)) return true;
+    // Permit info pages
+    if (/\b(storm\s+damage\s+and\s+building\s+permit\s+information|building\s+permit\s+information)\b/i.test(lo)) return true;
+    // ── v4-b6: Retrospective/historical language — not forward-looking leads ──
+    if (/\b(was\s+(built|completed|constructed|opened|demolished|renovated)\b|completed\s+in\s+\d{4}|opened\s+(in|last)\s|built\s+in\s+\d{4}|a\s+look\s+back|year\s+in\s+review|looking\s+back|decades?\s+ago)\b/.test(lo) &&
+        !/\b(new\s+phase|phase\s+[2-9]|upcoming|planned|proposed|expansion|future|next|seeking)\b/i.test(lo)) return true;
+    // ── v4-b6: Generic news-headline commentary — not actionable leads ──
+    // Market trend commentary
+    if (/\b(market|industry|sector)\s+(continues?|expected|projected|forecast|trending|slowing|growing|evolving|struggling|booming|recovering)\b/.test(lo)) return true;
+    // "Report: X" / "Study: X" / "Survey: X" commentary titles
+    if (/^(report|study|survey|analysis|overview|update|recap|summary|review|roundup|preview|profile|spotlight|feature):/i.test(lo.trim())) return true;
+    // "What You Need to Know" / explainer titles
+    if (/\b(what\s+you\s+need\s+to\s+know|everything\s+you|here.?s\s+what|what\s+to\s+expect|things?\s+to\s+know)\b/.test(lo)) return true;
+    // "How X Is Changing Y" / "Why X Matters" without project signals
+    if (/^(how|why)\s+.{5,}\s+(is|are|was|were|matters?|affects?|impacts?|changes?|work)\b/i.test(lo) &&
+        !/\b(rfq|rfp|solicitation|renovation|construction|design|project|building|facility)\b/.test(lo)) return true;
+    // List-style headlines without project content
+    if (/^(top\s+\d+|\d+\s+(things?|ways?|reasons?|tips?|facts?|trends?)|best|worst|biggest|most)\s+/i.test(lo) &&
+        !/\b(construction|project|renovation|building|facility|development)\b/.test(lo)) return true;
     return false;
   };
 
@@ -5201,6 +5457,22 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
         !/\b(renovation|construction|building|facility|design|rfq|rfp|school|hospital|fire station|library|courthouse|campus|center)\b/i.test(lo))
       return { isTier2: true, reason: 'Redevelopment area', explanation: 'Redevelopment, urban renewal, or revitalization area. Likely a project generator for future A&E work. Review to decide.' };
     return { isTier2: false };
+  };
+
+  // ── v4-b6: Weak news lead filter ──
+  // News-lane leads must contain actual development/building/project signals.
+  // Generic civic, crime, lifestyle, dining, weather, or opinion content is not useful.
+  const isWeakNewsTitle = (title, description) => {
+    const lo = (title || '').toLowerCase();
+    const desc = (description || '').toLowerCase();
+    const combined = lo + ' ' + desc;
+    // Must have at least one A&E-relevant signal
+    const hasRelevantSignal = /\b(construction|renovation|building|facility|expansion|addition|replacement|project|design|architect|engineer|development|redevelopment|housing|school|hospital|campus|bond|levy|capital|cip|rfq|rfp|solicitation|permit|zoning|rezoning|subdivision|annexation|demolition|treatment plant|fire station|library|courthouse|police station|community center|recreation center|mixed.use|affordable housing|apartment|condo|commercial|industrial|warehouse|office building|data center|hotel|restoration|rehabilitation|modernization|remodel|upgrade|retrofit|master plan|feasibility|groundbreaking|excavation)\b/.test(combined);
+    if (!hasRelevantSignal) return true; // weak — no relevant signal
+    // Opinion/commentary with no concrete project action
+    if (/\b(should\s+(be|have|consider)|residents\s+(want|oppose|support|demand)|editorial|debate\s+over|critics?\s+say|opponents?\s+say|rally\s+(against|for)|protest|petition)\b/.test(combined) &&
+        !/\b(rfq|rfp|solicitation|groundbreaking|approved|funding|awarded|contract|permit|construction)\b/.test(combined)) return true;
+    return false;
   };
 
   // ── Procurement-only title (no identifiable project, service, or building) ──
@@ -5394,15 +5666,29 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
         }
       }
     }
+    // 5d. v4-b6: News-lane quality filter — news leads must have real A&E signals
+    if (!reason) {
+      const effectiveLane = lead.dashboard_lane || (() => {
+        const sn = (lead.sourceName || lead.sourceId || '').toLowerCase();
+        if (/missoulian|kpax|nbcmontana|mtpr|montanan|media|news|current/i.test(sn)) return 'news';
+        return null;
+      })();
+      if (effectiveLane === 'news' && isWeakNewsTitle(lead.title, lead.description)) {
+        reason = 'weak_news_no_signal';
+      }
+    }
     // 6. Infrastructure-only without building scope
     if (!reason && isInfraNoBuilding(lead)) reason = 'infrastructure_no_building';
     // 7. Civil/commodity without building scope
     if (!reason && isCivilOnly(lead)) reason = 'civil_commodity_no_building';
     // 8. Near-duplicate of a higher-scoring kept lead
+    // v4-b6: Use lower threshold (0.50) for cross-news-source dedup
     if (!reason) {
+      const isNewsLead = (lead.dashboard_lane === 'news') || /missoulian|kpax|nbcmontana|mtpr|montanan|media|news|current/i.test((lead.sourceName || lead.sourceId || '').toLowerCase());
       for (const k of kept) {
         const sim = wordSim(lead.title, k.title);
-        if (sim >= 0.65) {
+        const threshold = (isNewsLead && /missoulian|kpax|nbcmontana|mtpr|montanan|media|news|current/i.test((k.sourceName || k.sourceId || '').toLowerCase())) ? 0.50 : 0.65;
+        if (sim >= threshold) {
           // v3.5: Distinguish district-duplicate from project-duplicate
           const isDistrictLead = /\b(district|urd|tif|tedd|urban\s+renewal|redevelopment\s+area|corridor|triangle)\b/i.test(lead.title || '');
           const isDistrictKept = /\b(district|urd|tif|tedd|urban\s+renewal|redevelopment\s+area|corridor|triangle)\b/i.test(k.title || '');
@@ -5444,6 +5730,8 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
         // v3.5: Non-specific items are clearly not leads — auto-remove, don't clog review queue
         'noise_title',
         'no_lead_object_type',
+        // v4-b6: Weak news leads with no A&E signal — auto-remove
+        'weak_news_no_signal',
       ]);
 
       if (isStrategicWatch && !reason.startsWith('already_claimed_')) {
@@ -5859,7 +6147,7 @@ export default function ProjectScout() {
     if (sharedStoreStatus === 'checking') return; // Still checking shared store health
     if (sharedStoreStatus === 'connected' && !sharedSyncReady.current) return; // Connected but sync not done yet
     const cleanupVersion = localStorage.getItem('ps_board_cleanup_version');
-    const CURRENT_CLEANUP_VERSION = '2026-03-23-v38'; // v38: Stored survivor cleanup (noise+no_type → auto-remove) + strategic title rescue
+    const CURRENT_CLEANUP_VERSION = '2026-03-28-v40'; // v40: Lead-quality + news-quality pass — weak lead suppression, news relevance, cross-source dedup, retrospective filter
     if (cleanupVersion === CURRENT_CLEANUP_VERSION) { setBoardCleanupDone(true); return; }
 
     // Apply quality gates to all existing leads
@@ -6144,6 +6432,9 @@ export default function ProjectScout() {
 
   const [activeTab, setActiveTab] = useState('active');
   const [selectedLead, setSelectedLead] = useState(null);
+  // v4-b12: Batch triage mode
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchSelected, setBatchSelected] = useState(new Set());
   const [showAddLead, setShowAddLead] = useState(false);
   const [showPIFReview, setShowPIFReview] = useState(null);
   const [showNotPursuedDialog, setShowNotPursuedDialog] = useState(null);
@@ -6196,6 +6487,56 @@ export default function ProjectScout() {
     setSelectedLead(null);
     setShowNotPursuedDialog(null);
   }, [recordPruneDecision]);
+
+  // v4-b12: Batch triage actions
+  const batchMoveToNotPursued = useCallback((reason) => {
+    if (batchSelected.size === 0) return;
+    setLeads(prev => {
+      const selectedIds = batchSelected;
+      const moving = prev.filter(l => selectedIds.has(l.id));
+      setNotPursuedLeads(np => [
+        ...moving.map(lead => ({
+          ...lead,
+          status: LEAD_STATUS.NOT_PURSUED,
+          reasonNotPursued: reason || 'Batch review — not pursued',
+          reasonCategory: 'batch_review',
+          dateNotPursued: new Date().toISOString(),
+        })),
+        ...np,
+      ]);
+      return prev.filter(l => !selectedIds.has(l.id));
+    });
+    setBatchSelected(new Set());
+    setBatchMode(false);
+  }, [batchSelected]);
+
+  const batchSubmitToAsana = useCallback(() => {
+    if (batchSelected.size === 0) return;
+    setLeads(prev => {
+      const selectedIds = batchSelected;
+      const moving = prev.filter(l => selectedIds.has(l.id));
+      setSubmittedLeads(sub => [
+        ...moving.map(lead => ({
+          ...lead,
+          status: LEAD_STATUS.SUBMITTED_TO_ASANA,
+          dateSubmitted: new Date().toISOString(),
+          tracking_origin: 'batch_submit',
+        })),
+        ...sub,
+      ]);
+      return prev.filter(l => !selectedIds.has(l.id));
+    });
+    setBatchSelected(new Set());
+    setBatchMode(false);
+  }, [batchSelected]);
+
+  const toggleBatchSelect = useCallback((leadId) => {
+    setBatchSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId); else next.add(leadId);
+      return next;
+    });
+  }, []);
 
   const restoreFromNotPursued = useCallback((leadId, restoreToWatch = false) => {
     setNotPursuedLeads(prev => {
@@ -7520,7 +7861,7 @@ export default function ProjectScout() {
           )}
         </div>
 
-        {activeTab === 'active' && <ActiveLeadsTab leads={leads} onSelectLead={handleSelectLead} onUpdateLead={updateLead} />}
+        {activeTab === 'active' && <ActiveLeadsTab leads={leads} onSelectLead={handleSelectLead} onUpdateLead={updateLead} batchMode={batchMode} batchSelected={batchSelected} toggleBatchSelect={toggleBatchSelect} setBatchMode={setBatchMode} setBatchSelected={setBatchSelected} />}
         {activeTab === 'asana' && <SubmittedTab leads={submittedLeads} onSelectLead={handleSelectLead} onImport={() => setShowAsanaImport(true)} />}
         {activeTab === 'notpursued' && <NotPursuedTab leads={notPursuedLeads} submittedLeads={submittedLeads} onSelectLead={handleSelectLead} onRestore={restoreFromNotPursued} />}
         {activeTab === 'registry' && <SourceRegistryView />}
@@ -7549,6 +7890,31 @@ export default function ProjectScout() {
           }
         }} allLeads={leads} notPursuedLeads={notPursuedLeads} submittedLeads={submittedLeads} />}
       </main>
+
+      {/* v4-b12: Batch triage floating action bar */}
+      {batchMode && batchSelected.size > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
+          background: '#0f172a', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.24)',
+          zIndex: 998, color: '#fff', fontSize: 13, fontWeight: 600,
+        }}>
+          <span>{batchSelected.size} selected</span>
+          <div style={{ width: 1, height: 20, background: '#334155' }} />
+          <button onClick={batchSubmitToAsana} style={{
+            padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: '#22c55e', color: '#fff', fontWeight: 600, fontSize: 12,
+          }}>Go / Submit</button>
+          <button onClick={() => batchMoveToNotPursued('Batch review — not pursued')} style={{
+            padding: '6px 14px', borderRadius: 6, border: '1px solid #475569', cursor: 'pointer',
+            background: 'transparent', color: '#f87171', fontWeight: 600, fontSize: 12,
+          }}>Not Pursuing</button>
+          <button onClick={() => { setBatchMode(false); setBatchSelected(new Set()); }} style={{
+            padding: '6px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: '#334155', color: '#94a3b8', fontWeight: 600, fontSize: 12,
+          }}>Cancel</button>
+        </div>
+      )}
 
       {/* ─── LEAD DETAIL OVERLAY ─── */}
       {selectedLead && (
