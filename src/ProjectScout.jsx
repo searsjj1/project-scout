@@ -755,27 +755,28 @@ function LeadCard({ lead, onClick, style: animStyle, batchMode, batchSelected, o
     onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)'; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = '#dde1e8'; }}
     onMouseLeave={e => { e.currentTarget.style.boxShadow = `0 1px 4px ${shadowColor}, 0 1px 6px rgba(0,0,0,0.02)`; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = borderColor; }}
     >
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            {batchMode && (
-              <div style={{
-                width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                border: `2px solid ${isSelected ? '#3b82f6' : '#cbd5e1'}`,
-                background: isSelected ? '#3b82f6' : '#fff',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'all 0.15s ease',
-              }}>
-                {isSelected && <span style={{ color: '#fff', fontSize: 11, fontWeight: 800, lineHeight: 1 }}>✓</span>}
-              </div>
-            )}
-            {isFav && <Star size={14} style={{ color: '#f59e0b', fill: '#f59e0b', flexShrink: 0 }} />}
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0, lineHeight: 1.35, letterSpacing: '-0.01em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={lead.title}>{cleanHtmlEntities(getWatchDisplayTitle(lead))}</h3>
-          </div>
-          <p style={{ fontSize: 12.5, color: '#64748b', margin: '3px 0 0', fontWeight: 500 }}>{lead.owner}</p>
+      {/* Header — v4-b16: Title gets full width, badges wrap below */}
+      <div style={{ marginBottom: 10 }}>
+        {/* Title row — full width */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5, marginBottom: 4 }}>
+          {batchMode && (
+            <div style={{
+              width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 2,
+              border: `2px solid ${isSelected ? '#3b82f6' : '#cbd5e1'}`,
+              background: isSelected ? '#3b82f6' : '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.15s ease',
+            }}>
+              {isSelected && <span style={{ color: '#fff', fontSize: 11, fontWeight: 800, lineHeight: 1 }}>✓</span>}
+            </div>
+          )}
+          {isFav && <Star size={14} style={{ color: '#f59e0b', fill: '#f59e0b', flexShrink: 0, marginTop: 3 }} />}
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0, lineHeight: 1.35, letterSpacing: '-0.01em', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', flex: 1, minWidth: 0 }} title={lead.title}>{cleanHtmlEntities(getWatchDisplayTitle(lead))}</h3>
         </div>
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+        {/* Owner */}
+        <p style={{ fontSize: 12.5, color: '#64748b', margin: '0 0 4px', fontWeight: 500 }}>{lead.owner}</p>
+        {/* Badges row — wraps naturally */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
           {reassess && (
             <span style={{
               fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
@@ -815,7 +816,6 @@ function LeadCard({ lead, onClick, style: animStyle, batchMode, batchSelected, o
               letterSpacing: '0.03em', whiteSpace: 'nowrap',
             }}>{classLabel.label}</span>
           )}
-        </div>
         {lead.leadOrigin === 'manual' && (
           <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
             background: '#dbeafe', color: '#1e40af',
@@ -858,6 +858,7 @@ function LeadCard({ lead, onClick, style: animStyle, batchMode, batchSelected, o
             background: '#d1d5db', flexShrink: 0,
           }} />
         )}
+        </div>
       </div>
 
       {/* Meta row */}
@@ -5473,6 +5474,10 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
     if (/\b(rent\s+a\s+(county|city|town)\s+facility|get\s+married\s+at)\b/i.test(lo)) return true;
     // Permit info pages
     if (/\b(storm\s+damage\s+and\s+building\s+permit\s+information|building\s+permit\s+information)\b/i.test(lo)) return true;
+    // v4-b16: Non-project service contracts and programs
+    if (/^community\s+development\s+partnerships?\s*$/i.test(lo.trim())) return true;
+    if (/\b(concession\s+(operator|contract|services?)|food\s+service\s+contract|custodial\s+services?\s+contract|pest\s+control\s+contract|mowing\s+contract)\b/i.test(lo) &&
+        !/\b(renovation|construction|design|architect|building|facility)\b/i.test(lo)) return true;
     // ── v4-b6: Retrospective/historical language — not forward-looking leads ──
     if (/\b(was\s+(built|completed|constructed|opened|demolished|renovated)\b|completed\s+in\s+\d{4}|opened\s+(in|last)\s|built\s+in\s+\d{4}|a\s+look\s+back|year\s+in\s+review|looking\s+back|decades?\s+ago)\b/.test(lo) &&
         !/\b(new\s+phase|phase\s+[2-9]|upcoming|planned|proposed|expansion|future|next|seeking)\b/i.test(lo)) return true;
@@ -6235,11 +6240,47 @@ export default function ProjectScout() {
     if (sharedStoreStatus === 'checking') return; // Still checking shared store health
     if (sharedStoreStatus === 'connected' && !sharedSyncReady.current) return; // Connected but sync not done yet
     const cleanupVersion = localStorage.getItem('ps_board_cleanup_version');
-    const CURRENT_CLEANUP_VERSION = '2026-03-28-v40'; // v40: Lead-quality + news-quality pass — weak lead suppression, news relevance, cross-source dedup, retrospective filter
+    const CURRENT_CLEANUP_VERSION = '2026-03-29-v41'; // v41: Production convergence — Missoula-only cleanup, stale lead retirement, public notice activation
     if (cleanupVersion === CURRENT_CLEANUP_VERSION) { setBoardCleanupDone(true); return; }
 
+    // v4-b16: Missoula-only board cleanup — remove legacy non-Missoula leads
+    // These are leads from pre-V4 scans that predate the Missoula-first scope enforcement.
+    // Examples: Carroll College, Architecture & Engineering Division, statewide leads
+    const missoulaTerms = /\bmissoula\b/i;
+    const missoulaSources = /MT-MIS-|MT-MCO-|MT-MRA-|MT-MEP-|MT-MCPS-|MT-UM-|MT-MSO-|MT-NEWS-|MT-CON-|MT-EMP-|MT-HOUSING-|MT-LIBRARY-|MT-PUBLIC-|MT-CHAMBER-|MT-COLLEGE-|MT-NOTICE-|MT-KPAX-|MT-ML-/;
+    let legacyRemoved = 0;
+    const preCleanLeads = leads.filter(lead => {
+      // Keep all manual, Asana, and immune leads
+      if (lead.leadOrigin === 'manual' || lead.leadOrigin === 'asana_business_pursuit' || lead.leadOrigin === 'asana_import') return true;
+      if (lead.pruneImmune || lead.favorite) return true;
+      // Keep leads from Missoula sources
+      if (lead.sourceId && missoulaSources.test(lead.sourceId)) return true;
+      // Keep leads that mention Missoula in location, title, or description
+      if (missoulaTerms.test(lead.location || '') || missoulaTerms.test(lead.title || '') || missoulaTerms.test(lead.description || '')) return true;
+      // Keep leads from state-level sources that are still valid Watch items (LRBP, state procurement)
+      if (/MT-AED-|MT-ARCH-/i.test(lead.sourceId || '')) return true;
+      // This is a legacy non-Missoula lead — move to Not Pursued
+      legacyRemoved++;
+      console.log(`[Board Cleanup] 🗑 Legacy non-Missoula lead: "${(lead.title || '').slice(0, 50)}" (source: ${lead.sourceId || lead.sourceName || '?'})`);
+      return false;
+    });
+    if (legacyRemoved > 0) {
+      console.log(`[Board Cleanup] Removed ${legacyRemoved} legacy non-Missoula leads from board`);
+      const legacyLeads = leads.filter(l => !preCleanLeads.includes(l));
+      setNotPursuedLeads(prev => [
+        ...legacyLeads.map(l => ({
+          ...l,
+          status: 'not_pursued',
+          reasonNotPursued: 'V4 Missoula-first cleanup — legacy non-Missoula lead',
+          reasonCategory: 'missoula_scope',
+          dateNotPursued: new Date().toISOString(),
+        })),
+        ...prev,
+      ]);
+    }
+
     // Apply quality gates to all existing leads
-    const currentLeads = leads;
+    const currentLeads = preCleanLeads;
     if (currentLeads.length === 0) { setBoardCleanupDone(true); return; }
     // v31d: Load taxonomy for taxonomy-aware pruning
     const currentTaxonomy = JSON.parse(localStorage.getItem('ps_taxonomy') || '[]');
@@ -6304,8 +6345,8 @@ export default function ProjectScout() {
       return updated;
     });
 
-    if (pruned.length > 0 || renamed > 0 || descCleaned > 0 || reviewQueue.length > 0 || immuneBackfilled > 0 || locationFixed > 0) {
-      console.log(`[Board Cleanup] One-time cleanup: pruning ${pruned.length}, review queue ${reviewQueue.length}, renaming ${renamed}, desc cleaned ${descCleaned}, immune backfilled ${immuneBackfilled}, locations fixed ${locationFixed}`);
+    if (pruned.length > 0 || renamed > 0 || descCleaned > 0 || reviewQueue.length > 0 || immuneBackfilled > 0 || locationFixed > 0 || legacyRemoved > 0) {
+      console.log(`[Board Cleanup] One-time cleanup: pruning ${pruned.length}, review queue ${reviewQueue.length}, renaming ${renamed}, desc cleaned ${descCleaned}, immune backfilled ${immuneBackfilled}, locations fixed ${locationFixed}, legacy removed ${legacyRemoved}`);
       pruned.forEach(p => console.log(`  ✂ "${p.title}" — ${p.reason}`));
       reviewQueue.forEach(r => console.log(`  ⚠ "${r.lead.title}" → review: ${r.reason}`));
       setLeads(finalWithImmune);
@@ -7708,6 +7749,47 @@ export default function ProjectScout() {
 
       return board;
     });
+
+    // v4-b16: Stale lead retirement — demote Active leads not confirmed by latest scan
+    // When a source was successfully scanned but did NOT re-generate a previously-active lead,
+    // it means source truth has changed (e.g., solicitation is now Awarded/Closed).
+    // Demote such leads from Active to Watch with a stale note.
+    if (results.sourceHealth && addedLeads.length >= 0) {
+      const scannedSourceIds = new Set((results.sourceHealth || []).filter(sh => sh.status === 'healthy').map(sh => sh.sourceId));
+      const addedTitles = new Set((addedLeads || []).map(l => (l.title || '').toLowerCase().trim()));
+      const updatedIds = new Set((updatedLeads || []).map(u => u.leadId));
+
+      setLeads(prev => {
+        let staleCount = 0;
+        const updated = prev.map(lead => {
+          // Only check Active leads from successfully-scanned sources
+          if (lead.status !== 'active' && lead.status !== LEAD_STATUS.ACTIVE) return lead;
+          if (!lead.sourceId || !scannedSourceIds.has(lead.sourceId)) return lead;
+          // Skip if the lead was re-generated or updated
+          const tl = (lead.title || '').toLowerCase().trim();
+          if (addedTitles.has(tl) || updatedIds.has(lead.id)) return lead;
+          // Skip user-created leads
+          if (lead.leadOrigin === 'manual' || lead.leadOrigin === 'asana_business_pursuit' || lead.leadOrigin === 'asana_import') return lead;
+          // Skip if lead was recently created (< 2 hours ago — may be from a different scan batch)
+          const ageMs = Date.now() - new Date(lead.dateDiscovered || 0).getTime();
+          if (ageMs < 2 * 60 * 60 * 1000) return lead;
+
+          // Demote: Active → Watch with stale note
+          staleCount++;
+          console.log(`[Stale Retirement] ⏳ "${lead.title?.slice(0, 50)}" — source scanned but lead not re-confirmed. Demoting to Watch.`);
+          return {
+            ...lead,
+            status: LEAD_STATUS.WATCH,
+            staleNote: `Not confirmed in scan of ${new Date().toISOString().split('T')[0]}. Source was scanned successfully but this solicitation was not re-generated. It may be Awarded, Closed, or Expired.`,
+            staleSince: new Date().toISOString(),
+          };
+        });
+        if (staleCount > 0) {
+          console.log(`[Stale Retirement] Demoted ${staleCount} Active leads to Watch (not confirmed by latest scan)`);
+        }
+        return updated;
+      });
+    }
 
     // v4-b13: Update source health from scan results
     if (results.sourceHealth && Array.isArray(results.sourceHealth)) {

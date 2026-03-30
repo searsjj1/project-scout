@@ -1,121 +1,199 @@
 {
-  "timestamp": "2026-03-29T22:08:23.670Z",
-  "seedVersion": "2026-03-29-v4-b15-public-notices",
-  "duration": "43.0s",
-  "sourcesScanned": 57,
-  "fetchSuccesses": 57,
+  "timestamp": "2026-03-30T21:55:50.242Z",
+  "seedVersion": "2026-03-30-v4-b20-teddcoverage",
+  "duration": "168.0s",
+  "sourcesScanned": 64,
+  "fetchSuccesses": 64,
   "fetchFailures": 0,
-  "leadsAdded": 17,
+  "leadsAdded": 31,
   "leadsSuppressed": 39,
   "laneBreakdown": {
-    "active_leads": 8,
-    "development_potentials": 5,
-    "news": 4
+    "development_potentials": 20,
+    "news": 4,
+    "active_leads": 7
   },
   "statusBreakdown": {
-    "watch": 11,
-    "active": 6
+    "watch": 26,
+    "active": 5
   },
   "qualityGates": {
     "genericTitle": 38,
     "portalTitle": 0,
-    "notProjectSpecific": 0,
-    "lowQuality": 1,
+    "notProjectSpecific": 1,
+    "lowQuality": 0,
     "duplicate": 6,
-    "totalBlocked": 38
+    "totalBlocked": 39
   },
   "suppressionReasons": {
-    "below_relevance_threshold": 1,
+    "program_not_project": 1,
+    "org_name_title": 3,
+    "vlt_trailing_period": 10,
     "annual_report": 1,
-    "vlt_trailing_period": 15,
     "vlt_ui_fragment": 2,
     "facility_rental": 1,
-    "vlt_explanatory_clause": 1,
-    "vlt_truncated_ellipsis": 2,
     "it_website_project": 2,
-    "org_name_title": 1,
     "park_equipment": 1,
     "recreation_program": 1,
+    "educational_comparison": 1,
     "outdated_plan": 1,
     "school_admin_content": 6,
     "standalone_school_name": 3,
-    "fee_schedule": 1
+    "role_description": 2,
+    "news_not_relevant": 1,
+    "meeting_venue": 1,
+    "fee_schedule": 1,
+    "vlt_org_context_fragment": 1
   },
   "leads": [
     {
-      "title": "Community Development Partnerships",
-      "sourceId": "MT-MIS-004",
-      "lane": "active_leads",
+      "title": "Urban Renewal Plans",
+      "sourceId": "MT-MIS-006",
+      "lane": "development_potentials",
       "status": "watch",
-      "relevanceScore": 34,
-      "pursuitScore": 17,
-      "description": "Funded by an award of $1.3 million dollars from the Science Education Partnership Award (SEPA) program of the National Institutes Health , Missoula is the first city in the nation to receive a SEPA grant. Together with our community, the LINK is creating a dynamic health-science learning hub in the ",
-      "evidence": "Project signal: Project detail found via Community Planning, Development & Innovation (planning & zoning records). Direct project detail: \"Community Development Partnerships\". Artifact path: Community",
+      "relevanceScore": 23,
+      "pursuitScore": 9,
+      "description": "Urban Renewal Plans — Source: Capital/CIP planning",
+      "evidence": "Project signal: Project detail found via Major Projects (redevelopment/economic development). Direct project detail: \"Urban Renewal Plans\". Artifact path: Major Projects → Urban Renewal Plans | Missou",
       "location": "Missoula, MT",
       "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Riverfront Triangle URD",
+      "sourceId": "MT-MIS-006",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 49,
+      "pursuitScore": 27,
+      "description": "Riverfront Triangle URD , Hellgate URD The Downtown Safety, Access, and Mobility (SAM) project combines several transportation and safety projects along, Front St., Main St., Higgins Ave, and ADA access to Caras Park, in — Source: Redevelopment/economic development",
+      "evidence": "Project signal: Project detail found via Major Projects (redevelopment/economic development). Direct project detail: \"&nbsp;Riverfront Triangle URD\". Artifact path: Major Projects → &nbsp;Riverfront T",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Midtown Commons (aka Southgate Crossing)",
+      "sourceId": "MT-MIS-006",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 34,
+      "pursuitScore": 24,
+      "description": "Midtown Commons (aka Southgate Crossing) 📍 Located in Urban Renewal District(s): URD III In June 2025 the City of Missoula entered into an agreement with Miramonte Companies to establish a development plan for the city- — Source: Capital/CIP planning",
+      "evidence": "Project signal: Project detail found via Major Projects (redevelopment/economic development). Direct project detail: \"Urban Renewal Plans\". Artifact path: Major Projects → Urban Renewal Plans → Urban ",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "North MRL Triangle Redevelopment Plan",
+      "sourceId": "MT-MIS-006",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 23,
+      "pursuitScore": 9,
+      "description": "North MRL Triangle Redevelopment Plan 📍 Located in Urban Renewal District(s): URD III Per City Council Resolution #8729, MRA has contracted GGLO to lead a robust, multiphase public engagement process regarding future us This process will explore community priorities regarding the site, and ultimate",
+      "evidence": "Project signal: Project detail found via Major Projects (redevelopment/economic development). Direct project detail: \"Urban Renewal Plans\". Key finding: North MRL Triangle Redevelopment Plan 📍 Locate",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Riverfront Triangle Development",
+      "sourceId": "MT-MIS-006",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 34,
+      "pursuitScore": 15,
+      "description": "Riverfront Triangle Development 📍 Located in Urban Renewal District(s): Riverfront Triangle URD The City of Missoula is ready to advance a transformative redevelopment project in the Riverfront Triangle Urban Renewal Di We are finalizing a development agreement with Averill Hospitality for the sale",
+      "evidence": "Project signal: Project detail found via Major Projects (redevelopment/economic development). Direct project detail: \"&nbsp;Riverfront Triangle URD\". Key finding: Riverfront Triangle Development 📍 Lo",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "West Broadway River Corridor Plan",
+      "sourceId": "MT-MIS-006",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 23,
+      "pursuitScore": 9,
+      "description": "West Broadway River Corridor Plan 📍 Located in Urban Renewal District(s): URD II MRA has teamed with the City s Departments of Parks and Recreation and Public Works and Mobility, Trout Unlimited, and Montana Fish, Wildl — Source: Capital/CIP planning",
+      "evidence": "Project signal: Project detail found via Major Projects (redevelopment/economic development). Direct project detail: \"Urban Renewal Plans\". Key finding: West Broadway River Corridor Plan 📍 Located in",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Budget — FY2026 Adopted Budget — Community Planning, Development, & Innovation",
+      "sourceId": "MT-MIS-007",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 54,
+      "pursuitScore": 25,
+      "description": "Community Planning, Development, & Innovation Fire Department Health Department Human Resources Missoula Parking Commission Missoula Redevelopment Agency Parks & Recreation Parks & Recreation Community Investment Program — Source: Capital/CIP planning",
+      "evidence": "Project signal: Capital plan document found via FY2026 Adopted Budget (capital/CIP budget). Direct capital plan document: \"FY26 City of Missoula State Published Budget\". Artifact path: FY2026 Adopted ",
+      "location": "Missoula, MT",
+      "marketSector": "Public Safety",
       "projectType": "Other",
       "leadClass": "watch_signal",
       "watchCategory": "redevelopment_area"
     },
     {
-      "title": "Scott Street Project",
-      "sourceId": "MT-MEP-002",
+      "title": "Budget — FY2026 Adopted Budget — FY26 MRA CIP3 URD III Oxford-Central Water Main Project",
+      "sourceId": "MT-MIS-007",
       "lane": "development_potentials",
       "status": "watch",
-      "relevanceScore": 58,
-      "pursuitScore": 32,
-      "description": "Southgate Crossing is intended to be a vibrant redevelopment project that integrates residential and recreational spaces to enhance the overall vitality of Midtown Missoula. Midtown Master Plan Southgate Draft Development Plan A plan developed by Southgate Mall Associates in partnership with MRA to ",
-      "evidence": "Project signal: Solicitation found via Invest in Transformation (redevelopment/economic development). Direct solicitation: \"Southgate Crossing - Solicitation Period Closed\". Artifact path: Invest in T",
-      "location": "Missoula, MT",
-      "marketSector": "Mixed Use",
-      "projectType": "Other",
-      "leadClass": "watch_signal",
-      "watchCategory": "named_project"
-    },
-    {
-      "title": "Riverfront Triangle",
-      "sourceId": "MT-MEP-002",
-      "lane": "development_potentials",
-      "status": "watch",
-      "relevanceScore": 56,
-      "pursuitScore": 31,
-      "description": "Southgate Crossing is intended to be a vibrant redevelopment project that integrates residential and recreational spaces to enhance the overall vitality of Midtown Missoula. Midtown Master Plan Southgate Draft Development Plan A plan developed by Southgate Mall Associates in partnership with MRA to ",
-      "evidence": "Project signal: Solicitation found via Invest in Transformation (redevelopment/economic development). Direct solicitation: \"Southgate Crossing - Solicitation Period Closed\". Artifact path: Invest in T",
-      "location": "Missoula, MT",
-      "marketSector": "Mixed Use",
-      "projectType": "Other",
-      "leadClass": "watch_signal",
-      "watchCategory": "named_project"
-    },
-    {
-      "title": "Southgate Crossing Dev Site Brief",
-      "sourceId": "MT-MEP-002",
-      "lane": "development_potentials",
-      "status": "watch",
-      "relevanceScore": 46,
-      "pursuitScore": 26,
-      "description": "Southgate Crossing is intended to be a vibrant redevelopment project that integrates residential and recreational spaces to enhance the overall vitality of Midtown Missoula. Midtown Master Plan Southgate Draft Development Plan A plan developed by Southgate Mall Associates in partnership with MRA to ",
-      "evidence": "Project signal: Solicitation found via Invest in Transformation (redevelopment/economic development). Direct solicitation: \"Southgate Crossing - Solicitation Period Closed\". Artifact path: Invest in T",
-      "location": "Missoula, MT",
-      "marketSector": "Mixed Use",
-      "projectType": "Other",
-      "leadClass": "watch_signal",
-      "watchCategory": "named_project"
-    },
-    {
-      "title": "Riverfront Triangle URD",
-      "sourceId": "MT-MRA-002",
-      "lane": "development_potentials",
-      "status": "watch",
-      "relevanceScore": 41,
-      "pursuitScore": 25,
-      "description": "Riverfront Triangle URD — Source: Redevelopment/economic development",
-      "evidence": "Strategic area: Named district/project page found via MRA Urban Renewal Districts (redevelopment/economic development). Direct project detail: \"Riverfront Triangle URD\". Artifact path: MRA Urban Renew",
+      "relevanceScore": 40,
+      "pursuitScore": 28,
+      "description": "FY26 MRA CIP3 URD III Oxford-Central Water Main Project FY26 MRA CIP4 URD II Bitterroot Trail MRL Bridge FY26 MRA CIP5 NRSS URD Scott St-Ravara Housing FY26 MRA CIP6 URD III Brooks St BRT-TOD Construction FY26 MRA CIP7 F — Source: Capital/CIP planning",
+      "evidence": "Project signal: Capital plan document found via FY2026 Adopted Budget (capital/CIP budget). Direct capital plan document: \"FY26 City Attorney Civil Budget Presentation\". Artifact path: FY2026 Adopted ",
       "location": "Missoula, MT",
       "marketSector": "Mixed Use",
       "projectType": "Other",
       "leadClass": "watch_signal",
       "watchCategory": "tif_district"
+    },
+    {
+      "title": "Budget — FY2026 Adopted Budget — FY26 MRA CIP6 URD III Brooks St BRT-TOD Construction",
+      "sourceId": "MT-MIS-007",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 40,
+      "pursuitScore": 28,
+      "description": "FY26 MRA CIP6 URD III Brooks St BRT-TOD Construction FY26 MRA CIP7 Front St URD Caras Park Recreational Ribbon FY 26 MRA Budget Presentation Parks & Recreation Return to Department List FY26 Parks 1 Contractual and Utili",
+      "evidence": "Project signal: Capital plan document found via FY2026 Adopted Budget (capital/CIP budget). Direct capital plan document: \"FY26 City Attorney Civil Budget Presentation\". Artifact path: FY2026 Adopted ",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Budget — FY2026 Adopted Budget — FY26 Parks CIPU6 West Broadway River Corridor",
+      "sourceId": "MT-MIS-007",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 59,
+      "pursuitScore": 43,
+      "description": "FY26 Parks CIPU6 West Broadway River Corridor FY26 Parks CIPU7 Acquisitions FY26 Parks CIPU8 UF Reforestation FY26 Parks CIPU9 Rose Memorial Park FY26 Parks CIPU10 Sports Courts FY26 Parks CIPU11 Greenough and Sacajawea — Source: Capital/CIP planning",
+      "evidence": "Project signal: Capital plan document found via FY2026 Adopted Budget (capital/CIP budget). Direct capital plan document: \"FY26 City Attorney Prosecution Budget Presentation\". Key finding: FY26 Parks ",
+      "location": "Missoula, MT",
+      "marketSector": "Other",
+      "projectType": "Master Plan",
+      "leadClass": "watch_signal",
+      "watchCategory": "development_program"
     },
     {
       "title": "MRA Urban Renewal Districts",
@@ -124,8 +202,8 @@
       "status": "watch",
       "relevanceScore": 40,
       "pursuitScore": 25,
-      "description": "Strategic redevelopment area with 2 associated project(s): Downtown Investment within an Urban Renewal District vs. Outside an Urban..., Riverfront Triangle URD. Source: MRA Urban Renewal Districts.",
-      "evidence": "Strategic district: MRA Urban Renewal Districts. Strategic redevelopment area with 2 associated project(s): Downtown Investment within an Urban Renewal District vs. Outside an Urban..., Riverfront Tri",
+      "description": "Strategic redevelopment area with 2 associated project(s): Downtown Investment within an Urban Renewal District vs. Outside an Urban Renewal District, Riverfront Triangle URD. Source: MRA Urban Renewal Districts.",
+      "evidence": "Strategic district: MRA Urban Renewal Districts. Strategic redevelopment area with 2 associated project(s): Downtown Investment within an Urban Renewal District vs. Outside an Urban Renewal District, ",
       "location": "",
       "marketSector": "Mixed Use",
       "projectType": "Other",
@@ -161,6 +239,36 @@
       "projectType": "Other",
       "leadClass": "watch_signal",
       "watchCategory": "named_project"
+    },
+    {
+      "title": "North Riverside Parks/Trails Project",
+      "sourceId": "MT-MIS-012",
+      "lane": "active_leads",
+      "status": "watch",
+      "relevanceScore": 71,
+      "pursuitScore": 52,
+      "description": "Construction will resume in Spring 2025, the project is approximately 60% complete. Downtown SAM Improvements The Downtown SAM project includes major improvements to Ron s River Trail from Front Street into Kiwanis Park and an ADA-accessible ramp from the east side of Beartracks Bridge to East Caras",
+      "evidence": "Project signal: Project detail found via City of Missoula — Parks & Recreation (institutional/campus records). Direct project detail: \"North Riverside Parks/Trails Project\". Key finding: Construction ",
+      "location": "Missoula, MT",
+      "marketSector": "Recreation",
+      "projectType": "RFQ/RFP",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "PROST Master Plan",
+      "sourceId": "MT-MIS-012",
+      "lane": "active_leads",
+      "status": "watch",
+      "relevanceScore": 70,
+      "pursuitScore": 34,
+      "description": "Additional project contacts: Haley Erickson at ericksonh@ci.missoula.mt.us and Ryan Applegate at applegater@ci.missoula.mt.us .",
+      "evidence": "Project signal: Project detail found via City of Missoula — Parks & Recreation (institutional/campus records). Direct project detail: \"PROST 2040 Master Plan\". Artifact path: City of Missoula — Parks ",
+      "location": "Missoula, MT",
+      "marketSector": "K-12",
+      "projectType": "Master Plan",
+      "leadClass": "watch_signal",
+      "watchCategory": "development_program"
     },
     {
       "title": "FY27 COMPASS Commission Facilitaton RFP",
@@ -223,21 +331,6 @@
       "watchCategory": "named_project"
     },
     {
-      "title": "City of Missoula Parks and Recreation RFP",
-      "sourceId": "MT-NOTICE-001",
-      "lane": "active_leads",
-      "status": "active",
-      "relevanceScore": 65,
-      "pursuitScore": 45,
-      "description": "City of Missoula Park and Recreation is seeking proposals for concession operators. All proposals must be received no later than Friday, March 27, 2026, at 4:00 PM. A copy of the RFP can be accessed at www.ci.missoula.mt.us/bids. March 7, 14, 21, 2026 COL-MT-402010 MNAXLP — Source: Newspaper public ",
-      "evidence": "Public notice (Invitation to Bid): City of Missoula Parks and Recreation RFP. Published 2026-03-21 in Missoulian. City of Missoula Park and Recreation is seeking proposals for concession operators. Al",
-      "location": "Missoula, Montana",
-      "marketSector": "Other",
-      "projectType": "RFQ/RFP",
-      "leadClass": "active_solicitation",
-      "watchCategory": "named_project"
-    },
-    {
       "title": "MSO - Invitation to Bid",
       "sourceId": "MT-NOTICE-001",
       "lane": "active_leads",
@@ -253,6 +346,141 @@
       "watchCategory": "named_project"
     },
     {
+      "title": "Missoula Development Park – Parks 4, 6, and 8 on Expressway Rezone",
+      "sourceId": "MT-DEVAPP-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 47,
+      "pursuitScore": 23,
+      "description": "Missoula Development Park – Parks 4, 6, and 8 on Expressway Rezone — Source: Redevelopment/economic development",
+      "evidence": "Project signal: Project detail found via Private Development Projects & Applications (redevelopment/economic development). Direct project detail: \"Missoula Development Park – Parks 4, 6, and 8 on Expr",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "redevelopment_area"
+    },
+    {
+      "title": "Rattlesnake Hills Estates Planned Unit Development Multi-Dwelling Development",
+      "sourceId": "MT-DEVAPP-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 52,
+      "pursuitScore": 23,
+      "description": "Rattlesnake Hills Estates Planned Unit Development Multi-Dwelling Development — Source: Redevelopment/economic development",
+      "evidence": "Project signal: Project detail found via Private Development Projects & Applications (redevelopment/economic development). Direct project detail: \"Rattlesnake Hills Estates Planned Unit Development Mu",
+      "location": "Missoula, MT",
+      "marketSector": "Public Safety",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Carrera Commons – 123 S Curtis Street",
+      "sourceId": "MT-DEVAPP-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 36,
+      "pursuitScore": 28,
+      "description": "Carrera Commons – 123 S Curtis Street — Source: Redevelopment/economic development",
+      "evidence": "Project signal: Project detail found via Private Development Projects & Applications (redevelopment/economic development). Direct project detail: \"5425 Gharrett Street Wireless Communication Facility ",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "annexation_area"
+    },
+    {
+      "title": "Bonner Mill TEDD District",
+      "sourceId": "MT-TEDD-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 33,
+      "pursuitScore": 14,
+      "description": "Bonner Mill TEDD District — Source: Redevelopment/economic development",
+      "evidence": "Strategic area: Named district/project page found via MDA TEDDs — Targeted Economic Development Districts (redevelopment/economic development). Direct project document (pdf): \"Click here to read the B",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Bonner West Log Yard TEDD District",
+      "sourceId": "MT-TEDD-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 33,
+      "pursuitScore": 14,
+      "description": "Bonner West Log Yard TEDD District — Source: Redevelopment/economic development",
+      "evidence": "Strategic area: Named district/project page found via MDA TEDDs — Targeted Economic Development Districts (redevelopment/economic development). Direct project document (pdf): \"Click here to read the B",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Wye 1 TEDD District",
+      "sourceId": "MT-TEDD-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 33,
+      "pursuitScore": 14,
+      "description": "Wye 1 TEDD District — Source: Redevelopment/economic development",
+      "evidence": "Strategic area: Named district/project page found via MDA TEDDs — Targeted Economic Development Districts (redevelopment/economic development). Direct project document (pdf): \"Click here to read the W",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Wye 2 TEDD District",
+      "sourceId": "MT-TEDD-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 33,
+      "pursuitScore": 14,
+      "description": "Wye 2 TEDD District — Source: Redevelopment/economic development",
+      "evidence": "Strategic area: Named district/project page found via MDA TEDDs — Targeted Economic Development Districts (redevelopment/economic development). Direct project document (pdf): \"Click here to read the W",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Grant Creek Crossing TEDD District",
+      "sourceId": "MT-TEDD-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 33,
+      "pursuitScore": 14,
+      "description": "Grant Creek Crossing TEDD District — Source: Redevelopment/economic development",
+      "evidence": "Strategic area: Named district/project page found via MDA TEDDs — Targeted Economic Development Districts (redevelopment/economic development). Direct project document (pdf): \"Click here to read the G",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
+      "title": "Missoula Development Park",
+      "sourceId": "MT-TEDD-001",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 33,
+      "pursuitScore": 14,
+      "description": "Missoula Development Park In 2016 the Airport Industrial Development District sunsetted after 25 fruitful years. Substantial new industrial tax base was created because of the existence of the TEDD. When it sunsetted, ta — Source: Redevelopment/economic development",
+      "evidence": "Project signal: Project document (PDF) found via MDA TEDDs — Targeted Economic Development Districts (redevelopment/economic development). Direct project document (pdf): \"Click here to read the Bonner",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "strategic_watch",
+      "watchCategory": "tif_district"
+    },
+    {
       "title": "Missoula Housing Authority — Development Projects",
       "sourceId": "MT-HOUSING-002",
       "lane": "news",
@@ -264,21 +492,6 @@
       "location": "Missoula, MT",
       "marketSector": "Other",
       "projectType": "Other",
-      "leadClass": "watch_signal",
-      "watchCategory": "named_project"
-    },
-    {
-      "title": "3 million fire station and the renovation of an existing station",
-      "sourceId": "MT-PUBLIC-001",
-      "lane": "active_leads",
-      "status": "watch",
-      "relevanceScore": 50,
-      "pursuitScore": 35,
-      "description": "3 million fire station and the renovation of an existing station — Source: Institutional/campus",
-      "evidence": "Project signal: Project detail found via Missoula Fire Department (institutional/campus records). Direct project detail: \"Fire Inspection and Plan Check Fees\". Artifact path: Missoula Fire Department ",
-      "location": "Missoula, MT",
-      "marketSector": "Public Safety",
-      "projectType": "Renovation",
       "leadClass": "watch_signal",
       "watchCategory": "named_project"
     },
@@ -300,9 +513,19 @@
   ],
   "suppressed": [
     {
-      "title": "Urban Renewal Plans",
-      "reason": "below_relevance_threshold",
-      "relevanceScore": 18
+      "title": "Community Development Partnerships",
+      "reason": "program_not_project",
+      "relevanceScore": 45
+    },
+    {
+      "title": "Missoula Redevelopment Agency",
+      "reason": "org_name_title",
+      "relevanceScore": 49
+    },
+    {
+      "title": "What You Should Know Records Urban Renewal Plans Payments Meetings Jobs Parks...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 19
     },
     {
       "title": "2024 Planning, Development and Sustainability Annual Report",
@@ -315,7 +538,7 @@
       "relevanceScore": 26
     },
     {
-      "title": "Sheriff s Office, the Missoula Detention Facility, and District Courts These departments are funded by countywide taxes.",
+      "title": "Budget — County Budget — Sheriff s Office, the Missoula Detention Facility, and District Courts These departments are funded by countywide taxes.",
       "reason": "vlt_trailing_period",
       "relevanceScore": 64
     },
@@ -330,92 +553,47 @@
       "relevanceScore": 57
     },
     {
-      "title": "Development project that Missoulians and neighborhood residents can be proud...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 46
-    },
-    {
-      "title": "City of Missoula in 2020 to encourage development",
-      "reason": "vlt_explanatory_clause",
+      "title": "Missoula Redevelopment Agency",
+      "reason": "org_name_title",
       "relevanceScore": 51
     },
     {
-      "title": "Munity input have been done regarding the development potential for the site...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 51
+      "title": "Budget — FY2026 Adopted Budget — Vasecka 1 - Central Services - Defer Website Modernization - FY26 Amendment",
+      "reason": "it_website_project",
+      "relevanceScore": 68
     },
     {
-      "title": "…reet Master plan, a North and Westside community survey, the city-wide housi",
-      "reason": "vlt_truncated_ellipsis",
-      "relevanceScore": 51
+      "title": "Budget — FY2026 Adopted Budget — FY26 Central Services 4 Website Modernization",
+      "reason": "it_website_project",
+      "relevanceScore": 68
     },
     {
-      "title": "Private partnership and development project that Missoulians and neighborhood...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 28
-    },
-    {
-      "title": "…s Urban Renewal Districts, the site has plenty of opportunities for public/",
-      "reason": "vlt_truncated_ellipsis",
+      "title": "Budget — FY2026 Adopted Budget — FY26 Parks FMRP CIP1 Replace-Upgrade Synthetic Turf and Equip",
+      "reason": "park_equipment",
       "relevanceScore": 38
     },
     {
-      "title": "Seeing this site transform into model development project and welcome all...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 28
-    },
-    {
-      "title": "Vasecka 1 - Central Services - Defer Website Modernization - FY26 Amendment",
-      "reason": "it_website_project",
-      "relevanceScore": 68
-    },
-    {
-      "title": "Community Planning, Development, & Innovation",
-      "reason": "org_name_title",
-      "relevanceScore": 54
-    },
-    {
-      "title": "FY26 Central Services 4 Website Modernization",
-      "reason": "it_website_project",
-      "relevanceScore": 68
-    },
-    {
-      "title": "FY26 Parks FMRP CIP1 Replace-Upgrade Synthetic Turf and Equip",
-      "reason": "park_equipment",
-      "relevanceScore": 49
-    },
-    {
-      "title": "FY26 FMRP CIPO2 Replace-Upgrade Tennis and Pickleball",
+      "title": "Budget — FY2026 Adopted Budget — FY26 FMRP CIPO2 Replace-Upgrade Tennis and Pickleball",
       "reason": "recreation_program",
       "relevanceScore": 43
     },
     {
-      "title": "Downtown Investment within an Urban Renewal District vs. Outside an Urban...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 26
+      "title": "Downtown Investment within an Urban Renewal District vs. Outside an Urban Renewal District",
+      "reason": "educational_comparison",
+      "relevanceScore": 36
     },
     {
-      "title": "Spital Historic Renovation Clinton School Addition Renovation Cattail Corner...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 73
-    },
-    {
-      "title": "…nce Carlton School Services Primary Bath Renovation Farmers State Bank...",
+      "title": "Sky Missoula County Courthouse Historic Renovation Public Safety Building...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 73
     },
     {
-      "title": "…ents Missoula County Courthouse Historic Renovation Jacobson Office Building...",
+      "title": "Paul Lutheran Church Renovation Hamilton High School Sports Complex Missoula...",
       "reason": "vlt_trailing_period",
-      "relevanceScore": 76
+      "relevanceScore": 73
     },
     {
-      "title": "Paul Lutheran Church Renovation Hellgate Elementary School District New...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 62
-    },
-    {
-      "title": "School Addition National Institute of Health Rocky Mountain Laboratories...",
+      "title": "Dream Services Primary Bath Renovation Berkshire Hathaway Home Services...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 73
     },
@@ -480,8 +658,43 @@
       "relevanceScore": 28
     },
     {
+      "title": "Community Planning, Development & Innovation",
+      "reason": "org_name_title",
+      "relevanceScore": 62
+    },
+    {
+      "title": "Representing Bonner Mill TIF Industrial District",
+      "reason": "role_description",
+      "relevanceScore": 23
+    },
+    {
+      "title": "Representing Bonner Mill TIF Industrial District Disabled",
+      "reason": "role_description",
+      "relevanceScore": 23
+    },
+    {
+      "title": "Blackfoot Crossing Riverfront Public Notice",
+      "reason": "news_not_relevant",
+      "relevanceScore": 34
+    },
+    {
+      "title": "Mmendations to City Council regarding the development, adoption, amendment,...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 32
+    },
+    {
+      "title": "Location: Missoula County Courthouse Annex, 200 W. Broadway, Sophie Moiese Room (151)",
+      "reason": "meeting_venue",
+      "relevanceScore": 51
+    },
+    {
       "title": "Fire Inspection and Plan Check Fees",
       "reason": "fee_schedule",
+      "relevanceScore": 50
+    },
+    {
+      "title": "Missoula Fire Department — fire station and the renovation of an existing station ($3M)",
+      "reason": "vlt_org_context_fragment",
       "relevanceScore": 50
     },
     {

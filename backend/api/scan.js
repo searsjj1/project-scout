@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.11-20260329-publicnotice-b15';
+const SCAN_BUILD_ID = 'scan-v4.17-20260330-teddcomplete-b21';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -274,8 +274,17 @@ function extractLeadFromNotice(notice, src) {
   else if (/\b(construction|renovation|building|facility|project)\b/.test(lo)) marketSector = 'Civic';
 
   // A&E relevance check — skip non-A&E notices
-  const hasAERelevance = /\b(construction|renovation|building|facility|design|architect|engineer|rfq|rfp|bid|capital|project|inspection|testing|infrastructure)\b/i.test(lo);
-  if (!hasAERelevance) return null;
+  // v4-b16: Tighter A&E relevance — require real building/facility/design signals
+  const hasAERelevance = /\b(construction|renovation|building|facility|design|architect|engineer|capital|infrastructure|school|hospital|campus|housing|treatment\s+plant|fire\s+station|library|courthouse)\b/i.test(lo);
+  // Allow through if it explicitly mentions RFQ/RFP for design/architect services
+  const hasDesignRFP = /\b(rfq|rfp)\b/i.test(lo) && /\b(design|architect|engineer|a\/e|building|facility|renovation|construction)\b/i.test(lo);
+  if (!hasAERelevance && !hasDesignRFP) return null;
+  // Suppress concession/food/service-only notices
+  if (/\b(concession|food\s+service|catering|vending|custodial|janitorial|pest\s+control|elevator\s+maintenance)\b/i.test(lo) &&
+      !/\b(renovation|construction|design|architect|building|facility)\b/i.test(lo)) return null;
+  // Suppress inspection/testing-only service contracts (not A&E building scope)
+  if (/\b(inspection\s+(and|&)\s+testing|testing\s+services?|inspection\s+services?)\b/i.test(lo) &&
+      !/\b(renovation|construction|design|architect|building|facility|school|hospital|campus)\b/i.test(lo)) return null;
 
   const id = `lead-notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const now = new Date().toISOString();
@@ -434,7 +443,7 @@ async function fetchPdfContent(url) {
     const r = await fetch(url, {
       signal: ctrl.signal,
       headers: {
-        'User-Agent': 'ProjectScout/1.0 (A&E+SMA Design)',
+        'User-Agent': 'Mozilla/5.0 (compatible; ProjectScout/1.0)',
         'Accept': 'application/pdf,*/*',
       },
     });
@@ -637,14 +646,19 @@ const SIGNALS = [
 async function fetchUrl(url, timeout = 15000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
+  // v4-b20: Some government board portals (escribemeetings.com) have incomplete
+  // SSL certificate chains. Temporarily relax TLS for those domains.
+  const needsRelaxedTLS = /escribemeetings\.com/i.test(url);
+  if (needsRelaxedTLS) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   try {
     const r = await fetch(url, {
       signal: ctrl.signal,
       headers: {
-        'User-Agent': 'ProjectScout/1.0 (A&E+SMA Design)',
+        'User-Agent': 'Mozilla/5.0 (compatible; ProjectScout/1.0)',
         'Accept': 'text/html,application/xhtml+xml,*/*',
       },
     });
+    if (needsRelaxedTLS) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
     clearTimeout(t);
     const raw = await r.text();
     const content = raw
@@ -667,6 +681,7 @@ async function fetchUrl(url, timeout = 15000) {
     };
   } catch (e) {
     clearTimeout(t);
+    if (needsRelaxedTLS) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
     return { ok: false, status: null, content: null, rawHtml: null, title: null, length: 0, lastMod: null,
       err: e.name === 'AbortError' ? `Timeout (${timeout}ms)` : e.message };
   }
@@ -811,10 +826,34 @@ function extractChildLinks(rawHtml, sourceUrl) {
     }
 
     // v4-b9: Housing authority project pages (non-CivicEngage — flat slug pattern)
-    // Narrow: only match development/project URLs, not news articles or general pages
     if (!linkType && /missoulahousing\.org/i.test(href)) {
       if (/\/(development|bristlecone|villagio|trinity|project)/i.test(hrefLo)) {
         linkType = 'project_detail';
+        relevanceHint = 7;
+      }
+    }
+
+    // v4-b17: Engage Missoula project pages
+    if (!linkType && /engagemissoula\.com/i.test(href)) {
+      if (/\/(scott|triangle|corridor|library|block|crossing|hotel|mrl|park|north|west|south)/i.test(hrefLo) &&
+          anchor.length >= 8) {
+        linkType = 'project_detail';
+        relevanceHint = 8;
+      }
+    }
+
+    // v4-b17: OnBoardGOV meeting portal links (boards.missoulacounty.us)
+    if (!linkType && /boards\.missoulacounty\.us/i.test(href)) {
+      if (/\b(agenda|minutes|meeting|video)\b/i.test(lo + ' ' + hrefLo)) {
+        linkType = 'meeting_document';
+        relevanceHint = 6;
+      }
+    }
+
+    // v4-b17: Missoula County TEDD PDF links
+    if (!linkType && /missoulacounty\.gov\/media\//i.test(hrefLo) && /\.pdf$/i.test(hrefLo)) {
+      if (/\b(tedd|development.plan|tax.increment|bonner|wye|grant.creek)\b/i.test(lo)) {
+        linkType = 'document_pdf';
         relevanceHint = 7;
       }
     }
@@ -1091,15 +1130,21 @@ function isNavigationJunk(text) {
     if (pat.test(text)) return true;
   }
   // Fail if mostly short words strung together (menu items)
+  // Exception: text with known strategic area keywords (TEDD, URD, TIF) is not menu junk
   const words = text.split(/\s+/).filter(w => w.length > 0);
   if (words.length > 3) {
     const capWords = words.filter(w => /^[A-Z]/.test(w) && w.length < 8);
-    if (capWords.length / words.length > 0.7) return true; // Mostly short capitalized menu items
+    if (capWords.length / words.length > 0.7) {
+      // v4-b21: Don't kill titles with known strategic district keywords
+      if (!/\b(tedd|urd|tif|urban\s+renewal|redevelopment|development\s+park|crossing|corridor|triangle|commons)\b/i.test(text)) {
+        return true;
+      }
+    }
   }
   // Fail if it doesn't contain at least one real project-related word
   // Also allow Watch-quality development/redevelopment area names with proper nouns
   if (!PROJECT_TITLE_WORDS.test(text)) {
-    const hasWatchAreaWord = /\b(redevelopment|development|revitalization|corridor|triangle|commons|crossing|downtown|midtown|district|quarter|village|landing|heights|terrace|urban renewal|master plan|mill|yard|log\s*yard|station|depot|junction|plaza|block|square|project|site|phase|parcel|park)\b/i.test(text);
+    const hasWatchAreaWord = /\b(redevelopment|development|revitalization|corridor|triangle|commons|crossing|downtown|midtown|district|quarter|village|landing|heights|terrace|urban renewal|master plan|mill|yard|log\s*yard|station|depot|junction|plaza|block|square|project|site|phase|parcel|park|tedd|urd|tif)\b/i.test(text);
     const hasProperNoun = /[A-Z][a-z]{2,}/.test(text);
     if (!(hasWatchAreaWord && hasProperNoun)) return true;
   }
@@ -1127,10 +1172,18 @@ function cleanTitle(raw) {
   // Strip leading junk: "RFQ #123 for " → keep just the project part handled elsewhere
   // Strip leading articles/prepositions if they start the title
   t = t.replace(/^(the|a|an|for|of|in|at|on|to|and|or)\s+/i, '');
+  // v4-b18: Strip "Click here to read/view/download the..." FIRST (before other lead-in stripping)
+  t = t.replace(/^click\s+here\s+to\s+(read|view|download|see|open)\s+(the\s+)?/i, '');
   // Strip filler lead-ins that create weak Watch titles
   // "Information About the Library Renovation" → "Library Renovation"
-  // "Overview of the Downtown Plan" → "Downtown Plan"
   t = t.replace(/^(information (about|on|regarding)|overview of|guide to|introduction to|summary of|update on|status of|details (on|about|of)|learn (more )?about)\s+(?:the\s+)?/i, '');
+  // v4-b20: Strip trailing period BEFORE TEDD suffix matching (anchor text often ends with "Plan.")
+  if (/[^.]\.$/.test(t)) t = t.replace(/\.$/, '').trim();
+  // v4-b21: Strip TEDD/district plan document suffixes — use "TEDD District" for minimum length
+  t = t.replace(/\s+Tax\s+Increment\s+Financing\s+Industrial\s+District\s+Plan\s*$/i, ' TEDD District');
+  t = t.replace(/\s+Comprehensive\s+Development\s+Plan\s*$/i, ' TEDD District');
+  // Clean up double "District" if the name already contains it
+  t = t.replace(/\s+District\s+TEDD\s+District\s*$/i, ' TEDD District');
   // Step 15: Strip "Construction of" / "Renovation of" lead-in when followed by a proper name
   // "Construction of Kings Bridge Deck Replacement" → "Kings Bridge Deck Replacement"
   t = t.replace(/^(construction|renovation|expansion|replacement|modernization|upgrade|restoration)\s+of\s+(?:the\s+)?/i, '');
@@ -2261,13 +2314,13 @@ function inferMarket(ctx, taxonomy) {
   if (/\b(elementary|middle school|high school|classroom|gymnasium|school district|k-12|k–12)\b/.test(lo)) return 'K-12';
   if (/\b(university|college|campus|dormitor|student housing|higher ed|oche)\b/.test(lo)) return 'Higher Education';
   if (/\b(hospital|medical center|clinic|outpatient|healthcare|urgent care|imaging|surgical)\b/.test(lo)) return 'Healthcare';
+  // v4-b20: Check TEDD/URD/redevelopment BEFORE airport — TEDD pages often mention
+  // "Airport Industrial Development District" in historical context, which causes
+  // misclassification. TEDD/URD/redevelopment signals should take priority.
+  if (/\b(tedd\b|tif\b|urd\b|urban renewal|tax increment|redevelopment\s+(area|district|zone|project)|development\s+(park|district)|mixed.?use|revitalization|midtown|riverfront|downtown\s+(development|redevelopment|master\s+plan))\b/.test(lo)) return 'Mixed Use';
   if (/\b(airport|terminal|hangar|aviation|runway|taxiway|apron)\b/.test(lo)) return 'Airports / Aviation';
   if (/\b(fire station|police|public safety|911|dispatch|jail|detention|corrections)\b/.test(lo)) return 'Public Safety';
   if (/\b(courthouse|city hall|government center|civic|municipal|county building|commission)\b/.test(lo)) return 'Civic';
-  // v4-b8: Check Mixed Use/redevelopment BEFORE Recreation — redevelopment pages
-  // often mention parks/recreation context alongside actual mixed-use development.
-  // Also check Housing before Recreation for the same reason.
-  if (/\b(mixed.?use|redevelopment|urban renewal|tif\b|tedd\b|urd\b|development (plan|agreement|project|district)|revitalization|midtown|riverfront|downtown\s+(development|redevelopment|master\s+plan))\b/.test(lo)) return 'Mixed Use';
   if (/\b(affordable housing|workforce housing|multifamily|apartment|residential|housing authority|housing development|housing project)\b/.test(lo)) return 'Housing';
   if (/\b(library|community center|senior center|recreation|pool|aquatic|arena|stadium)\b/.test(lo)) return 'Recreation';
   if (/\b(tribal|reservation|indian)\b/.test(lo)) return 'Tribal';
@@ -2562,7 +2615,7 @@ function extractLocation(ctx, src) {
   // v4-b8: Source entity/URL location fallback — if the source clearly serves a specific city
   // (e.g., ci.missoula.mt.us, missoulahousing.org, missoulacounty.gov), use that city
   const srcAll = (srcUrl + ' ' + srcName + ' ' + (src.organization || '') + ' ' + (src.entity_name || '')).toLowerCase();
-  if (/missoula/i.test(srcAll)) return 'Missoula, MT';
+  if (/missoula|engagemissoula|boards\.missoulacounty|missoulacountyvoice/i.test(srcAll)) return 'Missoula, MT';
   if (/kalispell/i.test(srcAll)) return 'Kalispell, MT';
   if (/whitefish/i.test(srcAll)) return 'Whitefish, MT';
   if (/hamilton/i.test(srcAll)) return 'Hamilton, MT';
@@ -2863,10 +2916,12 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       log(`    🔀 Profile decomposition: ${qualifiedLinks.length} named children found from ${matchingLinks.length} matching links`);
       for (const cl of qualifiedLinks) {
         const anchor = cleanTitle(cl.anchorText || '');
+        // v4-b18: Use parent page content as context for decomposed children
+        // so inferMarket and hasArchitecturalScope have enough text to work with
         decompChildCandidates.push({
           matchText: anchor,
-          fullContext: anchor,
-          wideContext: anchor,
+          fullContext: anchor + ' ' + content.slice(0, 500),
+          wideContext: content.slice(0, 1000),
           patternIndex: -1,
           extractionPath: 'decompose_named_child',
           headingTitle: anchor,
@@ -3210,6 +3265,24 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       if (containerChildTitles.has(key)) return false; // will be in containerChildCandidates
       // Keep if it's a very specific project-named candidate (not a generic heading)
       if (c.extractionPath === 'pattern' && /\b(rfq|rfp|soq|bid)\s+[-–—:]\s+/i.test(c.matchText || '')) return true;
+      // v4-b19: Keep named strategic project/area candidates from redevelopment/institutional pages
+      // These are exactly the critical project leads that should survive container decomposition
+      const ht = (c.headingTitle || '').toLowerCase();
+      const isNamedStrategicProject =
+        /\b(redevelopment|development|corridor|triangle|crossing|commons|block|mill|yard|plan|master plan|tedd|urd|renewal)\b/i.test(ht) &&
+        /[A-Z][a-z]{2,}/.test(c.headingTitle || '') &&
+        (c.headingTitle || '').split(/\s+/).length >= 2 &&
+        !/^(home|about|contact|staff|board|improve|programs?|workforce|community\s*&?\s*economic|located\s+in|urban\s+renewal\s+district)\b/i.test(ht) &&
+        !/\b(page|portal|hub|directory|registry|listing)\b/i.test(ht);
+      if (isNamedStrategicProject && (c.extractionPath || '').startsWith('html_')) {
+        // v4-b20: Enrich context with parent page text so inferMarket works
+        if (c.fullContext && c.fullContext.length < 100) {
+          c.fullContext = c.fullContext + ' ' + content.slice(0, 500);
+          c.wideContext = content.slice(0, 1000);
+        }
+        log(`    📍 Named strategic project preserved in container mode: "${c.headingTitle}"`);
+        return true;
+      }
       // Suppress generic heading/link candidates from the listing page
       return false;
     });
@@ -3238,7 +3311,8 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
     }
   }
 
-  const isHtmlExtracted = (ep) => ep && (ep.startsWith('html_') || ep === 'container_child');
+  // v4-b19: Include decomposed named children so they use their cleaned anchor text as title
+  const isHtmlExtracted = (ep) => ep && (ep.startsWith('html_') || ep === 'container_child' || ep === 'decompose_named_child' || ep === 'decompose_content_extract');
   candidates.sort((a, b) => {
     // Decomposed named children and container children first, then HTML-extracted, then pattern-based
     const aDecomp = a.extractionPath === 'decompose_named_child' || a.extractionPath === 'decompose_content_extract';
@@ -3771,6 +3845,34 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
           log(`    ↳ title enriched with entity context: "${enrichedTitle}" (was: "${title}")`);
           title = enrichedTitle;
         }
+      }
+    }
+
+    // v4-b16: Budget title normalization — format budget/CIP-derived leads as "Budget — Entity — Project"
+    if (profile.profile_type === 'budget' || /SF-08/.test(src.source_family || '')) {
+      const orgName = src.organization || src.name || '';
+      const cleanOrg = orgName.replace(/\s*[–—-]\s*.+$/, '').replace(/^(city|county|town)\s+of\s+/i, '').trim();
+      // Only apply if not already prefixed with "Budget"
+      if (!/^budget\s/i.test(title) && cleanOrg && title.length > 5) {
+        title = `Budget — ${cleanOrg} — ${title}`;
+        log(`    ↳ budget title normalized: "${title}"`);
+      }
+    }
+
+    // v4-b16: Sentence-like title cleanup
+    // Titles starting with dollar amounts or numbers should be restructured
+    if (/^\d+\s+million\s/i.test(title)) {
+      // "3 million fire station..." → "Fire Station — $3M New Construction"
+      const dollarMatch = title.match(/^(\d+)\s+million\s+(.+)/i);
+      if (dollarMatch) {
+        const amount = `$${dollarMatch[1]}M`;
+        const rest = dollarMatch[2].trim();
+        const orgName = src.organization || src.name || '';
+        const cleanOrg = orgName.replace(/\s*[–—-]\s*.+$/, '').replace(/^(city|county|town)\s+of\s+/i, '').trim();
+        title = cleanOrg ? `${cleanOrg} — ${rest} (${amount})` : `${rest} (${amount})`;
+        // Capitalize first letter of rest
+        title = title.charAt(0).toUpperCase() + title.slice(1);
+        log(`    ↳ sentence title restructured: "${title}"`);
       }
     }
 
@@ -5170,6 +5272,67 @@ export default async function handler(req, res) {
           suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'permit_info_page' });
           log(`    ⊘ BLOCKED (permit info page): ${c.title.slice(0,60)}`);
           continue;
+        }
+
+        // v4-b16: Non-project service/concession/operational items
+        if (/\b(concession\s+(operator|contract|services?)|food\s+service|catering|vending\s+(machine|service)|janitorial|custodial\s+services?|pest\s+control|elevator\s+maintenance|trash\s+(collection|hauling)|snow\s+removal\s+contract|mowing\s+contract)\b/i.test(clo) &&
+            !/\b(renovation|construction|design|architect|building|facility\s+(design|renovation|construction))\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'service_contract' });
+          log(`    ⊘ BLOCKED (service/concession contract): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // v4-b20: Contractor portfolio nav-list concatenations
+        // "YMCA Wellness Center Addition Tamarack Brewing Co" — multiple project names mashed together
+        if (clo.length > 40 && !/\b(rfq|rfp|bid|solicitation)\b/i.test(clo)) {
+          const capWords = (c.title || '').match(/[A-Z][a-z]+/g) || [];
+          const wordCount = clo.split(/\s+/).length;
+          if (capWords.length >= 4 && wordCount >= 6 && /\b(addition|renovation|improvement)\b/i.test(clo) &&
+              capWords.filter(w => w.length >= 4).length >= 4) {
+            skipGenericTitle++;
+            suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'nav_list_concat' });
+            log(`    ⊘ BLOCKED (nav list concatenation): ${c.title.slice(0,60)}`);
+            continue;
+          }
+        }
+        // v4-b20: Role/representation descriptions (not projects)
+        // "Representing Bonner Mill TIF Industrial District" is a board-member role description
+        if (/^representing\s+/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'role_description' });
+          log(`    ⊘ BLOCKED (role description): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // v4-b17: Meeting venue / location strings (not projects)
+        if (/^location\s*:/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'meeting_venue' });
+          log(`    ⊘ BLOCKED (meeting venue string): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // v4-b17: Board member titles (not projects)
+        if (/^(member|chair|vice.chair|secretary|treasurer|alternate|ex.officio)\s*[-–—:]/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'board_member' });
+          log(`    ⊘ BLOCKED (board member): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // v4-b16: Community development partnerships / programs (not projects)
+        if (/^community\s+development\s+partnerships?\s*$/i.test(clo.trim())) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'program_not_project' });
+          log(`    ⊘ BLOCKED (program, not project): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // v4-b16: Generic MSO / airport invitation without project name
+        if (/^mso\s*[-–—]\s*(invitation\s+to\s+bid|itb|bid)\s*$/i.test(clo.trim())) {
+          // Try to extract a better title from description
+          const descLo = (c.description || '').toLowerCase();
+          const airportProjectMatch = descLo.match(/\b(airport\s+improvement|terminal|runway|taxiway|apron|hangar|parking|concourse|security)\s+\w+/i);
+          if (airportProjectMatch) {
+            c.title = `MSO Airport — ${airportProjectMatch[0].trim().replace(/^\w/, ch => ch.toUpperCase())}`;
+            log(`    ↳ airport title improved: "${c.title}"`);
+          }
         }
 
         // Step 14a: v4-b6 — Retrospective/historical title filter

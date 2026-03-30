@@ -7,6 +7,7 @@ import { storageGet, storageSet, storageDelete, getTable, setTable } from './sto
 import {
   SEED_VERSION, SEED_SOURCE_FAMILIES, SEED_COVERAGE_REGIONS,
   SEED_COUNTY_MAPPING, SEED_ENTITIES, SEED_SOURCES, SEED_TAXONOMY,
+  SEED_PROPOSED_SOURCES,
 } from './seedData.js';
 
 export function runMigration() {
@@ -169,6 +170,10 @@ function runSeedUpdate(settings, notes) {
     mergeNewRecords(KEYS.ENTITIES, SEED_ENTITIES, 'entity_id', 'entities', notes);
     mergeNewRecords(KEYS.SOURCES, SEED_SOURCES, 'source_id', 'sources', notes);
     mergeNewRecords(KEYS.TAXONOMY, SEED_TAXONOMY, 'taxonomy_id', 'taxonomy items', notes);
+    // v4-b18: Merge approved proposed sources
+    if (SEED_PROPOSED_SOURCES && SEED_PROPOSED_SOURCES.length > 0) {
+      mergeNewRecords(KEYS.PROPOSED_SOURCES, SEED_PROPOSED_SOURCES, 'proposed_id', 'proposed sources', notes);
+    }
 
     // V4: Missoula-only reset — apply active/inactive state from seed to existing sources
     if (SEED_VERSION.includes('v4-')) {

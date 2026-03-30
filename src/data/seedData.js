@@ -2,7 +2,7 @@
  * Project Scout — Phase 1 Seed Data (canonical)
  * Source: ProjectScout_Sources_Primer.xlsx + Master Brief 3.0
  */
-export const SEED_VERSION = '2026-03-29-v4-b15-public-notices';
+export const SEED_VERSION = '2026-03-30-v4-b20-teddcoverage';
 
 // V4-b14: Critical Missoula sources — these are highest-priority sources that should be
 // monitored carefully for health. Broken critical sources need immediate repair.
@@ -34,6 +34,12 @@ export const CRITICAL_SOURCE_IDS = new Set([
   'MT-PUBLIC-001',  // Fire Department
   // Public Notices — produces newspaper-filed procurement notices
   'MT-NOTICE-001',  // Missoulian Public Notices (Column.us API)
+  // v4-b17: Critical governance and development intelligence
+  'MT-ENGAGE-001',  // Engage Missoula — public engagement platform
+  'MT-DEVAPP-001',     // Private Development Projects — development applications
+  'MT-TEDD-001',    // MDA TEDDs Hub — 5 TEDD districts
+  'MT-MDA-001',     // MDA Board — TEDD governance
+  'MT-LANDUSE-001', // Consolidated Land Use Board — land use approvals
 ]);
 
 // V4: Missoula-only scope. Sources outside Missoula County are deactivated.
@@ -49,7 +55,7 @@ const MISSOULA_ENTITY_IDS = new Set([
   // State-level A&E division — statewide mandate, Missoula-critical for LRBP and AED bids
   'ENT-MT-AED',
   // Economic development and business organizations
-  'ENT-MEP', 'ENT-MSO-CHAMBER',
+  'ENT-MEP', 'ENT-MSO-CHAMBER', 'ENT-MISSOULA-MDA',
   // Local media
   'ENT-MISSOULIAN', 'ENT-MSLA-CURRENT',
   // Commercial contractors — Missoula market actors
@@ -186,6 +192,8 @@ export const SEED_ENTITIES = [
   { entity_id:'ENT-QUALITY-CON', entity_name:'Quality Construction', entity_type:'contractor', state:'MT', primary_area:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], official_site:'https://qualityconstruction.com', procurement_url:null, notes:'Quality Construction — confirmed Missoula address: 2800 S. Reserve Street, Missoula MT 59801. Full-service GC with 8+ pages of projects. Categories: Institutional, Industrial/Professional, Multi-Family, Medical, Retail. Mountain Line Bus Garage and Missoula Fire Sciences Lab in portfolio.', active:true, date_added:'2026-03-28', added_by:'Seed' },
   { entity_id:'ENT-MARTEL', entity_name:'Martel Construction', entity_type:'contractor', state:'MT', primary_area:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], official_site:'https://www.martelconstruction.com', procurement_url:null, notes:'Martel Construction — Montana GC with confirmed Missoula operations. SmugMug-hosted portfolio. Project categories: Civic, Healthcare, Historic, Hospitality, General Commercial, Millwork, Recreation, Residential.', active:true, date_added:'2026-03-28', added_by:'Seed' },
   { entity_id:'ENT-MSLA-COLLEGE', entity_name:'Missoula College (UM)', entity_type:'university', state:'MT', primary_area:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], official_site:'https://www.umt.edu/missoula-college/', procurement_url:null, notes:'Missoula College — separate River Campus at 1205 E. Broadway St. Part of UM system but distinct physical campus. Monitor for River Campus facility planning distinct from main UM campus. Procurement flows through MT-UM-002.', active:true, date_added:'2026-03-28', added_by:'Seed' },
+  // v4-b17: Missoula Development Authority
+  { entity_id:'ENT-MISSOULA-MDA', entity_name:'Missoula Development Authority', entity_type:'economic_development', state:'MT', primary_area:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], official_site:'https://boards.missoulacounty.us/board/2562', procurement_url:null, notes:'Advisory board established 1997. Oversees 5 TEDDs: Bonner Mill, Bonner West Log Yard, Missoula Development Park, Wye/Wye 2, Grant Creek Crossing. Meets quarterly.', active:true, date_added:'2026-03-30', added_by:'Seed' },
 ];
 
 /* ── 17 SOURCES ───────────────────────────────────────────────── */
@@ -198,7 +206,9 @@ export const SEED_SOURCES = [
   { ...D, source_id:'MT-AED-002', entity_id:'ENT-MT-AED', source_family:'SF-01', priority_tier:'Tier 1', source_name:'RFQ / RFP Submissions (eMACS)', source_url:'https://architecture.mt.gov/RFQ', base_url:'https://architecture.mt.gov', state:'MT', county:'Lewis and Clark', city:'Helena', coverage_regions:['ALL_MT'], source_type:'RFQ/RFP page', owner_type:'state_agency', keywords_to_watch:['rfq','rfp','eMACS','architecture & engineering division'], board_or_department:'A&E Division', check_frequency:'Daily', notes:'eMACS workflow and current RFQs.', source_profile:{ profile_type:'procurement' } },
   { ...D, source_id:'MT-AED-003', entity_id:'ENT-MT-AED', source_family:'SF-08', priority_tier:'Tier 1', source_name:'Long Range Building Program (LRBP)', source_url:'https://architecture.mt.gov/LRBP', base_url:'https://architecture.mt.gov', state:'MT', county:'Lewis and Clark', city:'Helena', coverage_regions:['ALL_MT'], source_type:'Capital planning / LRBP', owner_type:'state_agency', keywords_to_watch:['lrbp','long-range building','capital plan','facility','modernization','deferred maintenance','building replacement','campus','renovation','addition','new construction','building program','facility assessment'], board_or_department:'A&E Division', check_frequency:'Monthly', notes:'Long Range Building Program — primary Watch source for future state building projects. LRBP book identifies all planned state facility projects before they reach RFQ/RFP stage. Critical for A&E + SMA Design pipeline intelligence.', date_added:'2026-03-15', source_profile:{ profile_type:'budget', dashboard_lane:'development_potentials' } },
   { ...D, source_id:'MT-AED-004', entity_id:'ENT-MT-AED', source_family:'SF-07', priority_tier:'Tier 2', source_name:'Consultants', source_url:'https://architecture.mt.gov/CONSULTANTS', base_url:'https://architecture.mt.gov', state:'MT', county:'Lewis and Clark', city:'Helena', coverage_regions:['ALL_MT'], source_type:'Consultant roster / validation', owner_type:'state_agency', keywords_to_watch:['consultant','architect','engineer','a/e','design firm','selection','contract'], board_or_department:'A&E Division', check_frequency:'Weekly', notes:'Consultant roster and selection records. Validation source for competitive intelligence and team tracking.', date_added:'2026-03-15' },
-  { ...D, source_id:'MT-AED-005', entity_id:'ENT-MT-AED', source_family:'SF-07', priority_tier:'Tier 2', source_name:'Completed Bids', source_url:'https://architecture.mt.gov/Completed-Bids', base_url:'https://architecture.mt.gov', state:'MT', county:'Lewis and Clark', city:'Helena', coverage_regions:['ALL_MT'], source_type:'Completed bid validation', owner_type:'state_agency', keywords_to_watch:['completed','awarded','bid','contract','construction','design','renovation'], board_or_department:'A&E Division', check_frequency:'Weekly', notes:'Completed bid records. Validation source for confirming awarded projects and tracking competitors.', date_added:'2026-03-15' },
+  // v4-b20: DEACTIVATED — Completed Bids is a validation-only source that produces only
+  // already-awarded leads. Block Hall Renovation etc. are completed projects, not pursuit targets.
+  { ...D, active:false, source_id:'MT-AED-005', entity_id:'ENT-MT-AED', source_family:'SF-07', priority_tier:'Tier 2', source_name:'Completed Bids', source_url:'https://architecture.mt.gov/Completed-Bids', base_url:'https://architecture.mt.gov', state:'MT', county:'Lewis and Clark', city:'Helena', coverage_regions:['ALL_MT'], source_type:'Completed bid validation', owner_type:'state_agency', keywords_to_watch:['completed','awarded','bid','contract','construction','design','renovation'], board_or_department:'A&E Division', check_frequency:'Weekly', notes:'DEACTIVATED v4-b20: Validation-only source — all bids are already completed/awarded. Use for competitor tracking, not lead generation.', date_added:'2026-03-15', deactivation_reason:'validation_only' },
   { ...D, source_id:'MT-HEL-001', entity_id:'ENT-HELENA', source_family:'SF-01', priority_tier:'Tier 1', source_name:'Bids / RFP / RFQ', source_url:'https://www.helenamt.gov/Business/Bids-RFP-RFQ', base_url:'https://www.helenamt.gov', state:'MT', county:'Lewis and Clark', city:'Helena', coverage_regions:['ALL_MT','HELENA'], source_type:'RFQ/RFP page', owner_type:'local_government', keywords_to_watch:['rfq','rfp','bid','design','construction'], board_or_department:'Purchasing/Procurement', check_frequency:'Daily', notes:'Helena open solicitations.' },
   { ...D, source_id:'MT-BOZ-001', entity_id:'ENT-BOZEMAN', source_family:'SF-01', priority_tier:'Tier 1', source_name:'Bids / RFPs / RFQs', source_url:'https://www.bozeman.net/business/rfps-and-bids', base_url:'https://www.bozeman.net', state:'MT', county:'Gallatin', city:'Bozeman', coverage_regions:['ALL_MT','BOZEMAN'], source_type:'RFQ/RFP page', owner_type:'local_government', keywords_to_watch:['rfq','rfp','bids','design services','engineering','planning'], board_or_department:'Purchasing/Procurement', check_frequency:'Daily', notes:'Open bids with dates.' },
   { ...D, source_id:'MT-KAL-001', entity_id:'ENT-KALISPELL', source_family:'SF-01', priority_tier:'Tier 1', source_name:'Bid Postings', source_url:'https://www.kalispell.com/Bids.aspx', base_url:'https://www.kalispell.com', state:'MT', county:'Flathead', city:'Kalispell', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Bid postings', owner_type:'local_government', keywords_to_watch:['rfq','rfp','architectural','engineering','design services','fire station'], board_or_department:'Purchasing/Procurement', check_frequency:'Daily', notes:'BENCHMARK SOURCE.', content_format:'html_table', extraction_notes:'CivicEngage Bids.aspx format.' },
@@ -218,7 +228,10 @@ export const SEED_SOURCES = [
   { ...D, source_id:'MT-MIS-003', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-02', priority_tier:'Tier 1', source_name:'City Council Agendas, Webcasts & Minutes', source_url:'https://www.ci.missoula.mt.us/1149/AgendasWebcastsMinutes', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Agenda center', owner_type:'local_government', keywords_to_watch:['capital','design','construction','contract','budget','bond','facility','park','infrastructure'], board_or_department:'City Council', check_frequency:'3x/week', notes:'Central meeting agendas hub — council + all boards/committees.', date_added:'2026-03-12', source_profile:{ profile_type:'agenda' } },
   { ...D, source_id:'MT-MIS-004', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-05', priority_tier:'Tier 1', source_name:'Community Planning, Development & Innovation', source_url:'https://www.ci.missoula.mt.us/2954/Community-Planning-Development-Innovatio', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Planning department', owner_type:'local_government', keywords_to_watch:['subdivision','development review','zoning','conditional use','annexation','growth policy'], board_or_department:'Community Planning', check_frequency:'3x/week', notes:'Umbrella for planning, development review, zoning, building.', date_added:'2026-03-12' },
   { ...D, source_id:'MT-MIS-005', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-08', priority_tier:'Tier 1', source_name:'Community Investment Program (CIP)', source_url:'https://www.ci.missoula.mt.us/121/Community-Investment-Program', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Capital improvement program', owner_type:'local_government', keywords_to_watch:['CIP','capital improvement','bond','levy','infrastructure','facility','deferred maintenance'], board_or_department:'Finance / CIP', check_frequency:'Monthly', notes:'CIP documents identify funded projects before procurement begins.', date_added:'2026-03-12', source_profile:{ profile_type:'budget', dashboard_lane:'development_potentials' } },
-  { ...D, source_id:'MT-MIS-006', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-07', priority_tier:'Tier 1', source_name:'Major Projects', source_url:'https://www.ci.missoula.mt.us/103/Major-Projects', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Capital projects list', owner_type:'local_government', keywords_to_watch:['project','construction','design','renovation','expansion','facility'], board_or_department:'Public Works / City', check_frequency:'Weekly', notes:'Active/planned major capital projects list. Separate from CIP.', date_added:'2026-03-12' },
+  // v4-b19: Changed profile from inferred 'institutional' to explicit 'redevelopment' so named
+  // strategic district/project leads (Midtown Commons, North MRL Triangle, Library Block, etc.)
+  // are not blocked by the institutional profile's blocked_object_types: ['district'].
+  { ...D, source_id:'MT-MIS-006', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-07', priority_tier:'Tier 1', source_name:'Major Projects', source_url:'https://www.ci.missoula.mt.us/103/Major-Projects', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Capital projects list', owner_type:'local_government', keywords_to_watch:['project','construction','design','renovation','expansion','facility','redevelopment','corridor','triangle','crossing','commons','block','midtown','riverfront','master plan'], board_or_department:'Public Works / City', check_frequency:'Weekly', notes:'Active/planned major capital projects list. Contains critical named redevelopment projects: Midtown Commons, North MRL Triangle, Library Block, Riverfront Triangle Development, West Broadway Corridor, Downtown SAM. Must use redevelopment profile to allow district-type leads through.', date_added:'2026-03-12', source_profile:{ profile_type:'redevelopment', dashboard_lane:'development_potentials' } },
 
   /* ── BATCH 1: Missoula Redevelopment Agency ────────────────────── */
   { ...D, source_id:'MT-MRA-001', entity_id:'ENT-MISSOULA-MRA', source_family:'SF-09', priority_tier:'Tier 2', source_name:'MRA Board Agendas & Minutes', source_url:'https://www.ci.missoula.mt.us/884/Agendas-Minutes', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Redevelopment board agendas', owner_type:'redevelopment_agency', keywords_to_watch:['urban renewal','TIF','tax increment','redevelopment','downtown','infrastructure'], board_or_department:'MRA Board', check_frequency:'3x/week', notes:'MRA manages 6 urban renewal districts. High-value for downtown/URD projects.', source_profile:{ profile_type:'redevelopment', dashboard_lane:'development_potentials' }, date_added:'2026-03-12' },
@@ -413,6 +426,42 @@ export const SEED_SOURCES = [
    * ────────────────────────────────────────────────────────────────────────── */
   { ...D, source_id:'MT-NOTICE-001', entity_id:'ENT-MT-FREEPRESS', source_family:'SF-14', priority_tier:'Tier 1', source_name:'Missoulian Public Notices — Bid & Procurement', source_url:'https://missoulian.column.us/search', base_url:'https://missoulian.column.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Newspaper public notices', owner_type:'other', keywords_to_watch:['invitation to bid','rfp','rfq','construction','design','architect','engineer','renovation','facility','building','project'], board_or_department:null, check_frequency:'Weekly', notes:'Missoulian newspaper public notices via Column.us API. Fetches Invitation to Bid notices for Missoula County. Complements direct county bids (MT-MCO-008) with legally-required newspaper filings that may appear before or instead of owner-side postings.', date_added:'2026-03-29', source_profile:{ profile_type:'public_notice', dashboard_lane:'active_leads', newspaper_name:'Missoulian', notice_types:['Invitation to Bid'], days_back:30, max_notices:20 } },
 
+  /* ── BATCH v4-b17: Critical Source Alignment — Phase 1A (2026-03-30) ──────────
+   * 5 highest-priority sources from the critical-source model:
+   * - MT-ENGAGE-001: Engage Missoula — public engagement platform (JS-dependent homepage,
+   *   but individual project pages have rich meta tags. Use as content enrichment source.)
+   * - MT-DEVAPP-001: Private Development Projects — CivicEngage listing of dev applications
+   * - MT-TEDD-001: MDA TEDDs Hub — 5 TEDD districts with decomposition
+   * - MT-MDA-001: MDA Board — quarterly board with TEDD governance decisions
+   * - MT-LANDUSE-001: Consolidated Land Use Board — successor to Planning Board (active)
+   * ──────────────────────────────────────────────────────────────────────────── */
+
+  // Engage Missoula — primary public engagement platform for city projects
+  // Note: Homepage is JS-dependent, but individual project pages (e.g., /scott-street-development)
+  // have rich meta tags with full project descriptions accessible via static HTML fetch.
+  { ...D, source_id:'MT-ENGAGE-001', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-09', priority_tier:'Tier 1', source_name:'Engage Missoula — Development Projects', source_url:'https://www.engagemissoula.com/', base_url:'https://www.engagemissoula.com', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Public engagement platform', owner_type:'city_government', keywords_to_watch:['project','development','plan','master plan','corridor','triangle','crossing','block','redevelopment','housing','park','construction','design','renovation','facility','community','district'], board_or_department:'Community Planning, Development & Innovation', check_frequency:'Weekly', notes:'Engage Missoula is the City of Missoula public engagement platform. Homepage is JS-rendered but individual project pages have rich <meta> content accessible via HTTP fetch. Contains active engagement for Scott Street, North MRL Triangle, West Broadway Corridor, Library Block, Northside Parks, and more. Cross-references with Major Projects page (MT-MIS-006).', date_added:'2026-03-30', source_profile:{ profile_type:'redevelopment', dashboard_lane:'development_potentials' } },
+
+  // Private Development Projects — CivicEngage listing page for development applications
+  { ...D, source_id:'MT-DEVAPP-001', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-05', priority_tier:'Tier 1', source_name:'Private Development Projects & Applications', source_url:'https://www.ci.missoula.mt.us/3230/Private-Development-Projects', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Development applications', owner_type:'city_government', keywords_to_watch:['subdivision','annexation','rezone','conditional use','floodplain','historic preservation','zoning amendment','townhome','development','project','application','review'], board_or_department:'Community Planning, Development & Innovation', check_frequency:'Weekly', notes:'Lists active development applications in review under Unified Development Code (Title 22) and legacy code (Title 20/18). Categories: Administrative Adjustments, Annexations, Board of Adjustment, Conditional Use, Floodplain Permits, Historic Preservation, Public Forum, Zoning Amendments, Subdivisions, Townhome Exemptions. Critical development intelligence source.', date_added:'2026-03-30', source_profile:{ profile_type:'redevelopment', dashboard_lane:'development_potentials' } },
+
+  // MDA TEDDs Hub — Targeted Economic Development Districts
+  { ...D, source_id:'MT-TEDD-001', entity_id:'ENT-MISSOULA-COUNTY', source_family:'SF-09', priority_tier:'Tier 1', source_name:'MDA TEDDs — Targeted Economic Development Districts', source_url:'https://www.missoulacounty.gov/departments/community-economic-development/tedds/', base_url:'https://www.missoulacounty.gov', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'TEDD district hub', owner_type:'county_government', keywords_to_watch:['tedd','targeted economic development','tax increment','bonner mill','log yard','development park','wye','grant creek','crossing','industrial','comprehensive development plan'], board_or_department:'Community & Economic Development', check_frequency:'Monthly', notes:'Hub for 5 Missoula County TEDD districts: Bonner Mill, Bonner West Log Yard, Missoula Development Park, Wye/Wye 2, Grant Creek Crossing. Each TEDD has a comprehensive development plan (PDF). Decompose to named district children. Cross-reference with MDA Board (MT-MDA-001) and Missoula County Voice.', date_added:'2026-03-30', source_profile:{ profile_type:'redevelopment', dashboard_lane:'development_potentials', decompose_named_children:{ enabled:true, child_patterns:['bonner mill','log yard','development park','wye','grant creek','tedd','crossing'], max_children:8, suppress_parent:false } } },
+
+  // MDA Board — Missoula Development Authority board agendas and minutes
+  { ...D, source_id:'MT-MDA-001', entity_id:'ENT-MISSOULA-COUNTY', source_family:'SF-02', priority_tier:'Tier 1', source_name:'MDA Board — Missoula Development Authority', source_url:'https://boards.missoulacounty.us/board/2562', base_url:'https://boards.missoulacounty.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Board agendas & minutes', owner_type:'county_government', keywords_to_watch:['tedd','tax increment','economic development','bonner','development park','wye','grant creek','infrastructure','project','capital','budget','construction','facility'], board_or_department:'Missoula Development Authority', check_frequency:'Quarterly', notes:'Advisory board established 1997. Oversees TEDDs and economic development. Meets quarterly (4th Wednesday, 3:15 PM). Agendas/minutes via SharePoint links on the board page. Cross-reference with TEDDs hub (MT-TEDD-001).', date_added:'2026-03-30', source_profile:{ profile_type:'agenda', dashboard_lane:'development_potentials' } },
+
+  // Downtown Missoula Partnership — downtown BID intelligence
+  { ...D, source_id:'MT-DOWNTOWN-001', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-09', priority_tier:'Tier 2', source_name:'Downtown Missoula Partnership', source_url:'https://www.missouladowntown.com/', base_url:'https://www.missouladowntown.com', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Downtown BID organization', owner_type:'other', keywords_to_watch:['downtown','development','project','construction','renovation','building','district','improvement','streetscape','facade','business','investment'], board_or_department:null, check_frequency:'Monthly', notes:'Downtown Missoula Partnership — manages downtown Business Improvement District. Monitors downtown development, investment, and improvement projects. Cross-references with Downtown BID board and City Council downtown agenda items.', date_added:'2026-03-30', source_profile:{ profile_type:'redevelopment', dashboard_lane:'development_potentials' } },
+
+  // Missoula County Voice — county development projects news
+  { ...D, source_id:'MT-MCVOICE-001', entity_id:'ENT-MISSOULA-COUNTY', source_family:'SF-16', priority_tier:'Tier 2', source_name:'Missoula County Voice — Development Projects', source_url:'https://missoulacountyvoice.com/development-projects', base_url:'https://missoulacountyvoice.com', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'County development news', owner_type:'county_government', keywords_to_watch:['development','project','construction','tedd','bonner','blackfoot','crossing','grass valley','grant creek','wye','facility','capital','infrastructure'], board_or_department:'Community & Economic Development', check_frequency:'Weekly', notes:'Missoula County Voice — development projects feed. Covers Blackfoot Crossing, Grass Valley, TEDD updates, and county development news. Complements TEDDs hub (MT-TEDD-001) and MDA Board (MT-MDA-001).', date_added:'2026-03-30', source_profile:{ profile_type:'media', dashboard_lane:'news' } },
+
+  // City Planning Commission — escribemeetings board portal
+  { ...D, source_id:'MT-CITYPLAN-001', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-02', priority_tier:'Tier 2', source_name:'City Planning Commission', source_url:'https://bm-public-missoula.escribemeetings.com/BoardDetails/BoardInformation/38', base_url:'https://bm-public-missoula.escribemeetings.com', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Board agendas & minutes', owner_type:'city_government', keywords_to_watch:['subdivision','zoning','rezone','development','conditional use','variance','permit','facility','construction','project','design','master plan','annexation'], board_or_department:'City Planning Commission', check_frequency:'Monthly', notes:'City of Missoula Planning Commission — reviews development applications, subdivisions, rezoning, conditional use permits. Escribemeetings portal. Critical for tracking development approvals that may generate A&E work.', date_added:'2026-03-30', source_profile:{ profile_type:'agenda', dashboard_lane:'development_potentials' } },
+
+  // Consolidated Land Use Board — successor to Planning Board (active since 2026)
+  { ...D, source_id:'MT-LANDUSE-001', entity_id:'ENT-MISSOULA-COUNTY', source_family:'SF-02', priority_tier:'Tier 1', source_name:'Missoula County Consolidated Land Use Board', source_url:'https://boards.missoulacounty.us/board/7128', base_url:'https://boards.missoulacounty.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Board agendas & minutes', owner_type:'county_government', keywords_to_watch:['subdivision','zoning','land use','development','rezone','annexation','conditional use','permit','variance','floodplain','growth policy','master plan','facility','construction','project'], board_or_department:'Consolidated Land Use Board', check_frequency:'Monthly', notes:'Successor to Missoula Consolidated Planning Board (board/2563 — no longer meeting). Meets 1st Wednesday each month, 6 PM, hybrid. 7 members + 2 alternates. Governs land use, zoning, subdivision approvals for Missoula County. Agendas via OnBoardGOV meeting portal.', date_added:'2026-03-30', source_profile:{ profile_type:'agenda', dashboard_lane:'development_potentials' } },
+
   /* ── BATCH v4-b5: URL Patch + Verified Additions (2026-03-28) ────────────────
    * Sources added after live URL verification pass:
    * - MT-HOUSING-002: Missoula Housing Authority news feed (split from HOUSING-001)
@@ -450,6 +499,50 @@ export const SEED_SOURCES = [
   { ...D, source_id:'MT-COLLEGE-001', entity_id:'ENT-MSLA-COLLEGE', source_family:'SF-07', priority_tier:'Tier 3', source_name:'Missoula College — River Campus', source_url:'https://www.umt.edu/missoula-college/', base_url:'https://www.umt.edu', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Community college campus', owner_type:'university', keywords_to_watch:['facility','capital','renovation','building','campus','construction','River Campus','trades','lab','addition','expansion','classroom','apprenticeship'], board_or_department:'Missoula College', check_frequency:'Monthly', notes:'Verified live 2026-03-28. Missoula College at 1205 E. Broadway St. (River Campus) — part of UM system but distinct physical location from main campus. Focuses on trades, apprenticeships, certificates, associate degrees. Capital projects for this campus would appear in state LRBP (MT-AED-003) or UM procurement (MT-UM-002) but campus page provides River Campus facility monitoring. Tier 3: lower signal volume, include for completeness.', date_added:'2026-03-28', source_profile:{ profile_type:'institutional' } },
 ];
 
+/* ── PHASE 2 APPROVED SOURCES — Staged for next critical-source pass ──────────
+ * These sources are approved but require individual URL verification and
+ * profile assignment before activation. Add in batches of 5-10.
+ *
+ * SCHOOL DISTRICTS (12 — board agendas/minutes for facilities planning):
+ * - Hellgate Elementary D4: https://www.hellgate.k12.mt.us/our-district/school-board
+ * - Lolo D7: https://www.loloschools.org/page/board
+ * - Potomac Elementary D11: https://www.potomacschoolmontana.us/events
+ * - Bonner Elementary D14: https://www.bonner.k12.mt.us/page/school-board-members
+ * - Woodman Elementary D18: https://www.woodmanschool.org/district-information/school-board-members
+ * - DeSmet Elementary D20: https://desmetschool.org/board-of-trustees/
+ * - Target Range Elementary D23: https://go.boarddocs.com/mt/target/Board.nsf/Public
+ * - Sunset Elementary D30: https://sites.google.com/sunsetschool1234.org/sunset-school/district-information/school-board-agenda
+ * - Clinton Elementary D32: https://clintoncougars.com/school-board
+ * - Swan Valley Elementary D33: https://www.swanvalleyelementary.org/school-board.html
+ * - Seeley Lake Elementary D34: https://www.sleonline.org/page/school-board/
+ * - Frenchtown D40: https://www.ftsd.org/page/school-board
+ *
+ * REMAINING COUNTY BOARDS:
+ * - Library Board: https://boards.missoulacounty.us/board/2549
+ * - Airport Authority Board: https://boards.missoulacounty.us/board/2545
+ * - Rural Fire District: https://boards.missoulacounty.us/board/2963
+ * - Parks & Trails Advisory Board: https://boards.missoulacounty.us/board/2565
+ * - Zoning Board of Adjustment: https://boards.missoulacounty.us/board/2569
+ * - Community Councils: Seeley Lake (2575), Swan Valley (2576), West Valley (2577),
+ *   Lolo (2574), East Missoula (2572), Clinton (5080), Bonner Milltown (2571)
+ * - Rural Fire Districts: Seeley Lake RFD (2964), Swan Valley FSA (2975),
+ *   Frenchtown RFD (2580), East Missoula RFD (2579)
+ *
+ * REMAINING CITY BOARDS (bm-public-missoula.escribemeetings.com):
+ * - City Planning Commission: /BoardDetails/BoardInformation/38
+ * - Downtown BID: /BoardDetails/BoardInformation/18
+ * - Library Board: /BoardDetails/BoardInformation/23
+ * - Housing Authority: /BoardDetails/BoardInformation/25
+ * - MRA Board: /BoardDetails/BoardInformation/26
+ * - MUTD Board: /BoardDetails/BoardInformation/34
+ * - Parks & Rec Board: /BoardDetails/BoardInformation/29
+ * - Police Commission: /BoardDetails/BoardInformation/30
+ *
+ * OTHER:
+ * - Downtown Missoula Partnership: https://www.missouladowntown.com/
+ * - Missoula County Voice: https://missoulacountyvoice.com/development-projects
+ * ──────────────────────────────────────────────────────────────────────── */
+
 // V4: Apply Missoula-only scope — deactivate non-Missoula sources
 // This is reversible: changing isMissoulaSource to return true reactivates everything
 for (const src of SEED_SOURCES) {
@@ -457,6 +550,15 @@ for (const src of SEED_SOURCES) {
     src.active = false;
     src.v4_deactivated = true; // marker for future reactivation
   }
+}
+
+// v4-b18: Source ID uniqueness guard — fail loudly if duplicate IDs exist
+const sourceIdSet = new Set();
+for (const src of SEED_SOURCES) {
+  if (sourceIdSet.has(src.source_id)) {
+    console.error(`[SEED DATA] ⚠ DUPLICATE source_id detected: "${src.source_id}" (${src.source_name}). Fix before deploying.`);
+  }
+  sourceIdSet.add(src.source_id);
 }
 
 /* ── 20 ENTITY TYPES ──────────────────────────────────────────── */
@@ -491,6 +593,19 @@ export const EXPECTED_FAMILIES_BY_TYPE = {
    classification, noise suppression, and client intelligence.
    Source: Master Brief, Strategic Goals Addendum, Taxonomy Draft
    ═══════════════════════════════════════════════════════════════ */
+
+// v4-b18: Approved proposed sources — seeded into ps_proposed_sources for structured review
+export const SEED_PROPOSED_SOURCES = [
+  { proposed_id:'PROP-SRC-DOWNTOWN', entity_name:'Downtown Missoula Partnership', proposed_url:'https://www.missouladowntown.com/', detected_family:'SF-09', why_proposed:'Critical BID/downtown intelligence. Listed in user critical-source model.', confidence:0.9, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-MCVOICE', entity_name:'Missoula County Voice', proposed_url:'https://missoulacountyvoice.com/development-projects', detected_family:'SF-16', why_proposed:'County development projects news — Blackfoot Crossing, Grass Valley, TEDD updates.', confidence:0.9, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-CITYPLAN', entity_name:'City Planning Commission', proposed_url:'https://bm-public-missoula.escribemeetings.com/BoardDetails/BoardInformation/38', detected_family:'SF-02', why_proposed:'City development review board. Escribemeetings platform — needs URL verification.', confidence:0.8, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-HELLGATE', entity_name:'Hellgate Elementary School D4', proposed_url:'https://www.hellgate.k12.mt.us/our-district/school-board', detected_family:'SF-02', why_proposed:'School district board — facilities planning and pre-bond intelligence.', confidence:0.7, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-FRENCHTOWN', entity_name:'Frenchtown Public Schools D40', proposed_url:'https://www.ftsd.org/page/school-board', detected_family:'SF-02', why_proposed:'School district board — facilities planning and pre-bond intelligence.', confidence:0.7, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-LOLO', entity_name:'Lolo School District D7', proposed_url:'https://www.loloschools.org/page/board', detected_family:'SF-02', why_proposed:'School district board — facilities planning and pre-bond intelligence.', confidence:0.7, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-TARGET', entity_name:'Target Range Elementary D23', proposed_url:'https://go.boarddocs.com/mt/target/Board.nsf/Public', detected_family:'SF-02', why_proposed:'School district board — BoardDocs platform. Facilities planning.', confidence:0.7, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-POLICECOM', entity_name:'Police Commission', proposed_url:'https://bm-public-missoula.escribemeetings.com/BoardDetails/BoardInformation/30', detected_family:'SF-02', why_proposed:'City Police Commission — facilities decisions. Escribemeetings.', confidence:0.6, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+  { proposed_id:'PROP-SRC-PARKSBOARD', entity_name:'Parks and Recreation Board', proposed_url:'https://bm-public-missoula.escribemeetings.com/BoardDetails/BoardInformation/29', detected_family:'SF-02', why_proposed:'City Parks board — recreation facility decisions. Escribemeetings.', confidence:0.7, discovered_from:'critical_source_list', status:'approved', date_proposed:'2026-03-30' },
+];
 
 export const SEED_TAXONOMY = [
   // ── SERVICE TAXONOMY ─────────────────────────────────────────
