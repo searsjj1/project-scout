@@ -5,7 +5,7 @@
  */
 import { useState, useEffect, useMemo } from 'react';
 import { getSourceFamilies, getSources, setSources, getEntities, setEntities, getCoverageRegions, setCoverageRegions, getCountyMapping, getProposedSources, setProposedSources, getProposedEntities, setProposedEntities } from '../data/storage.js';
-import { ENTITY_TYPES, EXPECTED_FAMILIES_BY_TYPE } from '../data/seedData.js';
+import { ENTITY_TYPES, EXPECTED_FAMILIES_BY_TYPE, CRITICAL_SOURCE_IDS } from '../data/seedData.js';
 import { createSource, createEntity, createProposedSource, createProposedEntity, CHECK_FREQUENCIES, TIERS } from '../data/schemas.js';
 
 const SUB_TABS = [
@@ -95,6 +95,7 @@ function SourcesTable({ sources, entities, families, onChanged }) {
   const [sortBy, setSortBy] = useState('entity');
   const [sortDir, setSortDir] = useState('asc');
   const [editing, setEditing] = useState(null); // null or source object
+  const [healthFilter, setHealthFilter] = useState('all'); // v4-b13
   const entityMap = useMemo(() => {
     const m = {};
     entities.forEach(e => { m[e.entity_id] = e.entity_name; });
@@ -126,6 +127,13 @@ function SourcesTable({ sources, entities, families, onChanged }) {
     if (stateFilter !== 'all') r = r.filter(s => s.state === stateFilter);
     if (familyFilter !== 'all') r = r.filter(s => s.source_family === familyFilter);
     if (tierFilter !== 'all') r = r.filter(s => s.priority_tier === tierFilter);
+    // v4-b14: Health + value filter from stats bar clicks
+    if (healthFilter === 'failing') r = r.filter(s => s.fetch_health === 'failing' || s.deactivation_reason === 'url_broken_404');
+    else if (healthFilter === 'repair') r = r.filter(s => (s.notes || '').includes('NEEDS REPAIR') || s.deactivation_reason === 'url_broken_404');
+    else if (healthFilter === 'untested') r = r.filter(s => (!s.fetch_health || s.fetch_health === 'untested') && s.active !== false);
+    else if (healthFilter === 'healthy') r = r.filter(s => s.fetch_health === 'healthy');
+    else if (healthFilter === 'active') r = r.filter(s => s.active !== false);
+    else if (healthFilter === 'critical') r = r.filter(s => CRITICAL_SOURCE_IDS.has(s.source_id));
     r.sort((a, b) => {
       let va, vb;
       if (sortBy === 'name') { va = a.source_name || ''; vb = b.source_name || ''; }
@@ -137,7 +145,7 @@ function SourcesTable({ sources, entities, families, onChanged }) {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return r;
-  }, [sources, search, stateFilter, familyFilter, tierFilter, sortBy, sortDir, entityMap, familyMap]);
+  }, [sources, search, stateFilter, familyFilter, tierFilter, healthFilter, sortBy, sortDir, entityMap, familyMap]);
   const handleSort = (col) => {
     if (sortBy === col) { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); }
     else { setSortBy(col); setSortDir('asc'); }
@@ -166,19 +174,42 @@ function SourcesTable({ sources, entities, families, onChanged }) {
     setEditing(null);
     onChanged();
   };
-  const activeCount = sources.filter(s => s.active).length;
+  const activeCount = sources.filter(s => s.active !== false).length;
+  const inactiveCount = sources.filter(s => s.active === false).length;
+  // v4-b14: Source health + value stats
+  const criticalCount = sources.filter(s => CRITICAL_SOURCE_IDS.has(s.source_id)).length;
+  const healthyCount = sources.filter(s => s.fetch_health === 'healthy' && s.active !== false).length;
+  const failingCount = sources.filter(s => (s.fetch_health === 'failing' || s.deactivation_reason === 'url_broken_404')).length;
+  const needsRepairCount = sources.filter(s => (s.notes || '').includes('NEEDS REPAIR') || s.deactivation_reason === 'url_broken_404').length;
+  const untestedCount = sources.filter(s => (!s.fetch_health || s.fetch_health === 'untested') && s.active !== false).length;
   const byState = {};
   sources.forEach(s => { byState[s.state] = (byState[s.state]||0) + 1; });
   return (
     <div>
       {/* Stats bar */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(110px, 1fr))', gap:8, marginBottom:16 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(100px, 1fr))', gap:8, marginBottom:16 }}>
         {[
           { label:'Total', value:sources.length, color:'#3b82f6' },
           { label:'Active', value:activeCount, color:'#10b981' },
-          ...Object.entries(byState).map(([st, n]) => ({ label:st, value:n, color:'#64748b' })),
+          { label:'Critical', value:criticalCount, color:'#1d4ed8' },
+          { label:'Healthy', value:healthyCount, color:'#10b981' },
+          { label:'Failing', value:failingCount, color:'#ef4444' },
+          { label:'Repair', value:needsRepairCount, color:'#dc2626' },
+          { label:'Untested', value:untestedCount, color:'#f59e0b' },
         ].map(s => (
-          <div key={s.label} style={{ background:'#fff', borderRadius:9, padding:'10px 14px', border:'1px solid rgba(0,0,0,0.05)' }}>
+          <div key={s.label} onClick={() => {
+            if (s.label === 'Failing') setHealthFilter(healthFilter === 'failing' ? 'all' : 'failing');
+            else if (s.label === 'Repair') setHealthFilter(healthFilter === 'repair' ? 'all' : 'repair');
+            else if (s.label === 'Untested') setHealthFilter(healthFilter === 'untested' ? 'all' : 'untested');
+            else if (s.label === 'Healthy') setHealthFilter(healthFilter === 'healthy' ? 'all' : 'healthy');
+            else if (s.label === 'Active') setHealthFilter(healthFilter === 'active' ? 'all' : 'active');
+            else if (s.label === 'Critical') setHealthFilter(healthFilter === 'critical' ? 'all' : 'critical');
+            else setHealthFilter('all');
+          }} style={{
+            background: '#fff', borderRadius:9, padding:'10px 14px',
+            border: `1px solid ${(s.label.toLowerCase() === healthFilter) ? s.color + '60' : 'rgba(0,0,0,0.05)'}`,
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}>
             <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', color:'#94a3b8', marginBottom:3 }}>{s.label}</div>
             <div style={{ fontSize:20, fontWeight:800, color:s.color, letterSpacing:'-0.02em' }}>{s.value}</div>
           </div>
@@ -224,11 +255,14 @@ function SourcesTable({ sources, entities, families, onChanged }) {
         )}
         {filtered.map(src => {
           const isBenchmark = src.notes?.includes('BENCHMARK');
+          const isCritical = CRITICAL_SOURCE_IDS.has(src.source_id);
+          const isBroken = src.fetch_health === 'failing' || src.deactivation_reason === 'url_broken_404';
+          const needsRepair = isBroken || (src.notes || '').includes('NEEDS REPAIR');
           const entityName = entityMap[src.entity_id] || src.entity_id || '—';
           const familyName = familyMap[src.source_family] || src.source_family || '—';
           const familyShort = familyName.split('/')[0].split('(')[0].trim();
           const tierColor = TIER_COLORS[src.priority_tier] || '#94a3b8';
-          const healthColor = HEALTH_COLORS[src.fetch_health] || '#d1d5db';
+          const healthColor = isBroken ? '#ef4444' : HEALTH_COLORS[src.fetch_health] || '#d1d5db';
           const isInactive = src.active === false;
           return (
             <div key={src.source_id} style={{
@@ -243,8 +277,11 @@ function SourcesTable({ sources, entities, families, onChanged }) {
               <div style={{ minWidth:0 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                   <span style={{ fontSize:12.5, fontWeight:600, color:'#0f172a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{src.source_name}</span>
+                  {isCritical && <span style={{ fontSize:9, fontWeight:700, padding:'1px 5px', borderRadius:4, background:'#dbeafe', color:'#1e40af', whiteSpace:'nowrap' }}>CRITICAL</span>}
                   {isBenchmark && <span style={{ fontSize:9, fontWeight:700, padding:'1px 5px', borderRadius:4, background:'#fef3c7', color:'#92400e', whiteSpace:'nowrap' }}>BENCHMARK</span>}
-                  {isInactive && <span style={{ fontSize:9, fontWeight:700, padding:'1px 5px', borderRadius:4, background:'#f1f5f9', color:'#94a3b8', whiteSpace:'nowrap' }}>INACTIVE</span>}
+                  {needsRepair && <span style={{ fontSize:9, fontWeight:700, padding:'1px 5px', borderRadius:4, background:'#fef2f2', color:'#dc2626', whiteSpace:'nowrap' }}>NEEDS REPAIR</span>}
+                  {isInactive && !needsRepair && <span style={{ fontSize:9, fontWeight:700, padding:'1px 5px', borderRadius:4, background:'#f1f5f9', color:'#94a3b8', whiteSpace:'nowrap' }}>INACTIVE</span>}
+                  {isInactive && needsRepair && <span style={{ fontSize:9, fontWeight:700, padding:'1px 5px', borderRadius:4, background:'#fef2f2', color:'#dc2626', whiteSpace:'nowrap' }}>BROKEN</span>}
                 </div>
                 {src.source_url ? (
                   <a href={src.source_url} target="_blank" rel="noreferrer" style={{ fontSize:10.5, color:'#3b82f6', textDecoration:'none', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block', maxWidth:'100%' }}

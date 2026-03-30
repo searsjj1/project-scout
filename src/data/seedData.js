@@ -2,7 +2,39 @@
  * Project Scout — Phase 1 Seed Data (canonical)
  * Source: ProjectScout_Sources_Primer.xlsx + Master Brief 3.0
  */
-export const SEED_VERSION = '2026-03-29-v4-b10-decompose';
+export const SEED_VERSION = '2026-03-29-v4-b15-public-notices';
+
+// V4-b14: Critical Missoula sources — these are highest-priority sources that should be
+// monitored carefully for health. Broken critical sources need immediate repair.
+// These are the sources that produce the strongest real leads.
+export const CRITICAL_SOURCE_IDS = new Set([
+  // Procurement — produces active RFPs/RFQs
+  'MT-MCO-008',   // County Bids & Proposals (Auditor) — produced Public Health RFP, COMPASS RFP
+  'MT-MIS-001',   // City Bids, RFPs & RFQs
+  'MT-MIS-002',   // City Bid Postings (CivicEngage)
+  // Redevelopment — produces strategic district leads
+  'MT-MEP-002',   // Invest in Transformation — produced Scott Street, Riverfront Triangle
+  'MT-MRA-002',   // MRA URDs — produced Riverfront Triangle URD, MRA URDs
+  'MT-MEP-001',   // MEP About / Overview
+  // Budget/CIP — produces capital project intelligence
+  'MT-MIS-007',   // City Budget Portal / FY2026 Adopted Budget
+  'MT-MIS-008',   // FY2026 Adopted Budget detail
+  'MT-MIS-006',   // Community Investment Program
+  // K-12 Capital — produces school facility leads
+  'MT-MCPS-003',  // MCPS Business Department (Bids & Finance)
+  'MT-MCPS-004',  // MCPS Board of Trustees
+  // Higher Ed — produces campus capital leads
+  'MT-UM-001',    // UM Facilities Services
+  'MT-UM-002',    // UM Procurement Services
+  // Airport — produces terminal/aviation capital leads
+  'MT-MSO-001',   // Airport Master Plan & Capital Planning
+  // Housing — produces affordable housing development leads
+  'MT-HOUSING-001', // Housing Authority Development Projects
+  // Public Safety — produces fire station/facility leads
+  'MT-PUBLIC-001',  // Fire Department
+  // Public Notices — produces newspaper-filed procurement notices
+  'MT-NOTICE-001',  // Missoulian Public Notices (Column.us API)
+]);
 
 // V4: Missoula-only scope. Sources outside Missoula County are deactivated.
 // They can be reactivated later when expanding county by county.
@@ -276,9 +308,11 @@ export const SEED_SOURCES = [
   { ...D, source_id:'MT-MRA-002', entity_id:'ENT-MISSOULA-MRA', source_family:'SF-09', priority_tier:'Tier 1', source_name:'MRA Urban Renewal Districts', source_url:'https://www.ci.missoula.mt.us/2418/Urban-Renewal-Districts', base_url:'https://www.ci.missoula.mt.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Redevelopment district hub', owner_type:'redevelopment_agency', keywords_to_watch:['urban renewal','URD','TIF','tax increment','redevelopment','downtown','front street','riverfront','midtown','north reserve','south reserve','hellgate','infrastructure','development','ravara','townhomes'], board_or_department:'MRA', check_frequency:'Monthly', notes:'Hub for all 6 Missoula urban renewal districts (URD II, URD III, Front Street, Riverfront Triangle, NRSS, Hellgate). TIF-funded projects and infrastructure improvements. High-value Watch source.', date_added:'2026-03-20', source_profile:{ profile_type:'redevelopment', dashboard_lane:'development_potentials', decompose_named_children:{ enabled:true, child_patterns:['urd','district','front street','riverfront','hellgate','north reserve','scott street','midtown','major projects'], max_children:8, suppress_parent:true } } },
 
   // Missoula County Public Schools — v31c: domain fixed from mcps.k12.mt.us (dead) to mcpsmt.org
-  { ...D, source_id:'MT-MCPS-001', entity_id:'ENT-MCPS', source_family:'SF-08', priority_tier:'Tier 2', source_name:'MCPS Bond Projects', source_url:'https://www.mcpsmt.org/Page/9328', base_url:'https://www.mcpsmt.org', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'School bond projects', owner_type:'school_district', keywords_to_watch:['facility','capital','bond','school','renovation','addition','modernization','maintenance','building','construction','replacement','HVAC','roof','campus','boiler','smart schools','elementary','high school'], board_or_department:'Facilities / Operations', check_frequency:'Monthly', notes:'MCPS Smart Schools bond projects — $158M in bonds for school renovations, replacements, HVAC, roofing, technology. Major capital project generator.', date_added:'2026-03-20' },
+  // v4-b14: DEACTIVATED — /Page/9328 returns 404. MCPS restructured their site. Needs new URL.
+  { ...D, active:false, source_id:'MT-MCPS-001', entity_id:'ENT-MCPS', source_family:'SF-08', priority_tier:'Tier 2', source_name:'MCPS Bond Projects', source_url:'https://www.mcpsmt.org/Page/9328', base_url:'https://www.mcpsmt.org', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'School bond projects', owner_type:'school_district', keywords_to_watch:['facility','capital','bond','school','renovation','addition','modernization','maintenance','building','construction','replacement','HVAC','roof','campus','boiler','smart schools','elementary','high school'], board_or_department:'Facilities / Operations', check_frequency:'Monthly', notes:'BROKEN: /Page/9328 returns 404 as of 2026-03-29. MCPS restructured site. NEEDS REPAIR: find current bond projects page on mcpsmt.org. Was: $158M Smart Schools bonds.', date_added:'2026-03-20', fetch_health:'failing', deactivation_reason:'url_broken_404' },
   // MCPS main site — captures general facilities news and upcoming bond efforts
-  { ...D, source_id:'MT-MCPS-002', entity_id:'ENT-MCPS', source_family:'SF-08', priority_tier:'Tier 2', source_name:'MCPS Smart Schools 2020', source_url:'https://www.mcpsmt.org/Page/7676', base_url:'https://www.mcpsmt.org', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'School bond program', owner_type:'school_district', keywords_to_watch:['smart schools','bond','renovation','construction','school','facility','capital','elementary','high school','building','roof','boiler','HVAC'], board_or_department:'Facilities / Operations', check_frequency:'Monthly', notes:'Smart Schools 2020 program overview and bond information. Tracks completed and ongoing school facility projects.', date_added:'2026-03-20' },
+  // v4-b14: DEACTIVATED — /Page/7676 returns 404. Same MCPS site restructure.
+  { ...D, active:false, source_id:'MT-MCPS-002', entity_id:'ENT-MCPS', source_family:'SF-08', priority_tier:'Tier 2', source_name:'MCPS Smart Schools 2020', source_url:'https://www.mcpsmt.org/Page/7676', base_url:'https://www.mcpsmt.org', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'School bond program', owner_type:'school_district', keywords_to_watch:['smart schools','bond','renovation','construction','school','facility','capital','elementary','high school','building','roof','boiler','HVAC'], board_or_department:'Facilities / Operations', check_frequency:'Monthly', notes:'BROKEN: /Page/7676 returns 404 as of 2026-03-29. Same MCPS site restructure. NEEDS REPAIR: find Smart Schools 2020 page on mcpsmt.org.', date_added:'2026-03-20', fetch_health:'failing', deactivation_reason:'url_broken_404' },
 
   // University of Montana
   { ...D, source_id:'MT-UM-001', entity_id:'ENT-UM', source_family:'SF-08', priority_tier:'Tier 2', source_name:'UM Facilities Services', source_url:'https://www.umt.edu/facilities/', base_url:'https://www.umt.edu', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'University facilities', owner_type:'university', keywords_to_watch:['facility','capital','renovation','building','campus','construction','deferred maintenance','modernization','addition','expansion','laboratory','dormitory','student housing','LRBP'], board_or_department:'Facilities Services', check_frequency:'Monthly', notes:'University of Montana campus facilities. Capital projects typically flow through state LRBP but UM also has self-funded facility work.', date_added:'2026-03-20' },
@@ -370,6 +404,14 @@ export const SEED_SOURCES = [
 
   // [v4b4-5] Missoula Housing Authority — affordable housing development projects (repointed b5)
   { ...D, source_id:'MT-HOUSING-001', entity_id:'ENT-MSLA-HOUSING', source_family:'SF-11', priority_tier:'Tier 2', source_name:'Missoula Housing Authority — Development Projects', source_url:'https://www.missoulahousing.org/development-projects', base_url:'https://www.missoulahousing.org', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Housing development projects', owner_type:'housing_authority', keywords_to_watch:['development','construction','groundbreaking','affordable housing','units','AMI','LIHTC','HUD','capital','project','Villagio','Trinity','navigation center','scattered site'], board_or_department:'Development', check_frequency:'Monthly', notes:'Verified live 2026-03-28. Domain missoulahousing.org confirmed. /development-projects has active project listings: Villagio Apartments ($42M, 200 units, Northside) and Trinity Apartment Homes (202 units + Navigation Center, Mullan site). Monitor for new LIHTC/HUD projects. Split with MT-HOUSING-002 (news).', date_added:'2026-03-28', source_profile:{ profile_type:'institutional', dashboard_lane:'development_potentials', decompose_named_children:{ enabled:true, child_patterns:['villagio','trinity','bristlecone','navigation center','apartment','development project','affordable housing'], max_children:6, suppress_parent:true, extract_from_content:true } } },
+
+  /* ── v4-b15: Missoulian Public Notices (Column.us) — NOW ACTIVE ──────────────
+   * Platform: Column.us (Elasticsearch API at cloudfunctions.net)
+   * API: POST us-central1-enotice-production.cloudfunctions.net/api/search/public-notices
+   * No auth required. Direct JSON response with notice text, type, county, dates.
+   * Ingestion: Via dedicated public_notice profile — bypasses fetchUrl(), calls API directly.
+   * ────────────────────────────────────────────────────────────────────────── */
+  { ...D, source_id:'MT-NOTICE-001', entity_id:'ENT-MT-FREEPRESS', source_family:'SF-14', priority_tier:'Tier 1', source_name:'Missoulian Public Notices — Bid & Procurement', source_url:'https://missoulian.column.us/search', base_url:'https://missoulian.column.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Newspaper public notices', owner_type:'other', keywords_to_watch:['invitation to bid','rfp','rfq','construction','design','architect','engineer','renovation','facility','building','project'], board_or_department:null, check_frequency:'Weekly', notes:'Missoulian newspaper public notices via Column.us API. Fetches Invitation to Bid notices for Missoula County. Complements direct county bids (MT-MCO-008) with legally-required newspaper filings that may appear before or instead of owner-side postings.', date_added:'2026-03-29', source_profile:{ profile_type:'public_notice', dashboard_lane:'active_leads', newspaper_name:'Missoulian', notice_types:['Invitation to Bid'], days_back:30, max_notices:20 } },
 
   /* ── BATCH v4-b5: URL Patch + Verified Additions (2026-03-28) ────────────────
    * Sources added after live URL verification pass:

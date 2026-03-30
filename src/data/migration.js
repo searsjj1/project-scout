@@ -212,6 +212,10 @@ function runSeedUpdate(settings, notes) {
           if (seed.source_name && seed.source_name !== src.source_name) {
             next = { ...next, source_name: seed.source_name };
           }
+          // v4-b14: Sync health and deactivation metadata from seed
+          if (seed.fetch_health) next = { ...next, fetch_health: seed.fetch_health };
+          if (seed.deactivation_reason) next = { ...next, deactivation_reason: seed.deactivation_reason };
+          if (seed.notes && seed.notes !== src.notes) next = { ...next, notes: seed.notes };
           return next;
         }
         return src;

@@ -2526,8 +2526,50 @@ function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead, batchMode, batchSel
               const watchDevPotentials = watchFiltered.filter(l => getEffectiveLane(l) === 'development_potentials');
               const watchNews = watchFiltered.filter(l => getEffectiveLane(l) === 'news');
 
+              // v4-b13: Group related leads by shared area/source context
+              const groupRelatedLeads = (leads) => {
+                // Detect area-name relationships (e.g., "Riverfront Triangle" ↔ "Riverfront Triangle URD")
+                const groups = [];
+                const used = new Set();
+                for (let i = 0; i < leads.length; i++) {
+                  if (used.has(i)) continue;
+                  const lead = leads[i];
+                  const related = [];
+                  const titleLo = (lead.title || '').toLowerCase();
+                  for (let j = i + 1; j < leads.length; j++) {
+                    if (used.has(j)) continue;
+                    const other = leads[j];
+                    const otherLo = (other.title || '').toLowerCase();
+                    // Same source
+                    const sameSource = lead.sourceId && lead.sourceId === other.sourceId;
+                    // Title overlap: one contains the other, or they share a significant word sequence
+                    const titleOverlap = (titleLo.length > 6 && otherLo.includes(titleLo.slice(0, Math.min(titleLo.length, 20)))) ||
+                      (otherLo.length > 6 && titleLo.includes(otherLo.slice(0, Math.min(otherLo.length, 20))));
+                    // Same watch area (URD, district, etc.)
+                    const sameArea = lead.watchCategory && lead.watchCategory === other.watchCategory &&
+                      ['tif_district', 'redevelopment_area'].includes(lead.watchCategory);
+                    if (sameSource || titleOverlap || sameArea) {
+                      related.push(j);
+                      used.add(j);
+                    }
+                  }
+                  used.add(i);
+                  groups.push({ primary: lead, related: related.map(j => leads[j]) });
+                }
+                return groups;
+              };
+
+              // v4-b13: Relationship label for related leads
+              const getRelationshipLabel = (lead, relatedLeads) => {
+                if (lead.leadClass === 'strategic_watch' || lead.watchCategory === 'redevelopment_area') return 'Strategic umbrella';
+                if (lead.extractionPath === 'decompose_named_child') return 'District lead';
+                if (relatedLeads?.length > 0) return 'Related signal';
+                return null;
+              };
+
               const LaneSubSection = ({ icon, title, color, bg, borderColor, leads: laneleads, emptyLabel }) => {
                 if (laneleads.length === 0) return null;
+                const groups = groupRelatedLeads(laneleads);
                 return (
                   <div style={{ marginTop: 28 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -2539,14 +2581,56 @@ function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead, batchMode, batchSel
                       <div style={{ flex: 1, height: 1, background: borderColor || '#e2e8f0' }} />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14, padding: '14px', background: bg + '30', borderRadius: 12, border: `1px solid ${borderColor || '#e2e8f0'}40` }}>
-                      {laneleads.map((lead, i) => {
-                        const disp = getWatchDisposition(lead);
-                        const isHiddenItem = disp === WATCH_DISPOSITION.MUTED || disp === WATCH_DISPOSITION.DISMISSED;
-                        return (
-                          <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)}
-                            batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
-                            style={{ opacity: isHiddenItem ? 0.5 : 1, animationDelay: `${i * 0.04}s`, animation: 'fadeUp 0.35s ease both' }}
-                          />
+                      {groups.map((group, gi) => {
+                        const hasRelated = group.related.length > 0;
+                        const allInGroup = [group.primary, ...group.related];
+                        return hasRelated ? (
+                          // Grouped cluster
+                          <div key={group.primary.id} style={{
+                            gridColumn: allInGroup.length <= 2 ? 'span 1' : 'span 1',
+                            background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0',
+                            padding: '4px', display: 'flex', flexDirection: 'column', gap: 4,
+                          }}>
+                            {/* Group header */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px 2px', fontSize: 10, fontWeight: 600, color: '#94a3b8' }}>
+                              <Layers size={11} style={{ color: '#94a3b8' }} />
+                              <span>Related signals ({allInGroup.length})</span>
+                              {group.primary.sourceName && (
+                                <span style={{ marginLeft: 'auto', fontSize: 9.5, color: '#b0b8c7' }}>{group.primary.sourceName.slice(0, 30)}</span>
+                              )}
+                            </div>
+                            {allInGroup.map((lead, i) => {
+                              const disp = getWatchDisposition(lead);
+                              const isHiddenItem = disp === WATCH_DISPOSITION.MUTED || disp === WATCH_DISPOSITION.DISMISSED;
+                              const relLabel = getRelationshipLabel(lead, group.related);
+                              return (
+                                <div key={lead.id} style={{ position: 'relative' }}>
+                                  {relLabel && (
+                                    <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 1, fontSize: 8.5, fontWeight: 600, padding: '1px 6px', borderRadius: 3, background: '#f1f5f9', color: '#94a3b8' }}>
+                                      {relLabel}
+                                    </div>
+                                  )}
+                                  <LeadCard lead={lead} onClick={() => onSelectLead(lead)}
+                                    batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
+                                    style={{ opacity: isHiddenItem ? 0.5 : 1, boxShadow: 'none', border: i > 0 ? '1px solid #f1f5f9' : undefined }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          // Standalone lead
+                          (() => {
+                            const lead = group.primary;
+                            const disp = getWatchDisposition(lead);
+                            const isHiddenItem = disp === WATCH_DISPOSITION.MUTED || disp === WATCH_DISPOSITION.DISMISSED;
+                            return (
+                              <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)}
+                                batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
+                                style={{ opacity: isHiddenItem ? 0.5 : 1, animationDelay: `${gi * 0.04}s`, animation: 'fadeUp 0.35s ease both' }}
+                              />
+                            );
+                          })()
                         );
                       })}
                     </div>
@@ -5060,6 +5144,7 @@ function translatePruneReason(reason, lead) {
   if (r.includes('already_claimed_has_contractor')) return { label: 'Contractor already selected', explanation: 'Source text indicates a contractor or CM has already been engaged for this project.', keepHint: 'Keep if the project may still need additional design services.' };
   if (r.includes('already_claimed_under_construction')) return { label: 'Already under construction', explanation: 'Source text suggests this project is already in the construction phase.', keepHint: 'Keep if future phases or expansion work are anticipated.' };
   if (r.includes('already_claimed_completed')) return { label: 'Project appears completed', explanation: 'Source text references ribbon-cutting, completion, or grand opening for this project.', keepHint: 'Keep if a follow-on project or new phase is expected.' };
+  if (r.includes('already_claimed_status_closed') || r.includes('already_claimed_status_awarded')) return { label: 'Solicitation closed or awarded', explanation: 'The source page shows this solicitation as Awarded, Closed, or no longer accepting submissions.', keepHint: 'Keep only if a new phase or re-solicitation is expected.' };
   // Noise/generic
   if (r === 'noise_title') return { label: 'Non-project content', explanation: 'This title matches patterns typical of administrative pages, governance documents, or non-project content rather than a real A&E opportunity.', keepHint: 'Keep if the item actually represents a real facility, capital, or design project.' };
   if (r === 'no_lead_object_type') return { label: 'No specific project identity', explanation: 'This item could not be identified as a specific project, solicitation, named site, or strategic district. It may be a generic program, department, initiative, or topic heading rather than a real lead.', keepHint: 'Keep if this actually represents a specific project, facility, or opportunity target with real A&E scope.' };
@@ -5732,6 +5817,9 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
         'no_lead_object_type',
         // v4-b6: Weak news leads with no A&E signal — auto-remove
         'weak_news_no_signal',
+        // v4-b14: Awarded/closed solicitations — auto-remove
+        'already_claimed_status_closed',
+        'already_claimed_status_awarded',
       ]);
 
       if (isStrategicWatch && !reason.startsWith('already_claimed_')) {
@@ -7620,6 +7708,27 @@ export default function ProjectScout() {
 
       return board;
     });
+
+    // v4-b13: Update source health from scan results
+    if (results.sourceHealth && Array.isArray(results.sourceHealth)) {
+      try {
+        const sources = JSON.parse(localStorage.getItem('ps_sources') || '[]');
+        let changed = false;
+        for (const sh of results.sourceHealth) {
+          const src = sources.find(s => s.source_id === sh.sourceId);
+          if (src && src.fetch_health !== sh.status) {
+            src.fetch_health = sh.status;
+            src.last_fetch_error = sh.error || null;
+            src.last_fetch_time = new Date().toISOString();
+            changed = true;
+          }
+        }
+        if (changed) {
+          localStorage.setItem('ps_sources', JSON.stringify(sources));
+          console.log(`[Source Health] Updated ${results.sourceHealth.length} source health records`);
+        }
+      } catch (e) { console.warn('[Source Health] Update failed:', e); }
+    }
   }, [setLeads]);
 
   // ─── Watch Triage Actions ──────────────────────────────────

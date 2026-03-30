@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.10-20260329-batchtriage-b12';
+const SCAN_BUILD_ID = 'scan-v4.11-20260329-publicnotice-b15';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -102,6 +102,17 @@ const SOURCE_PROFILES = {
     dashboard_lane: 'active_leads',
     ignore_patterns: ['academic program', 'student services', 'admissions', 'tuition', 'course catalog', 'financial aid'],
   },
+  // v4-b15: Public notice sources — fetched via Column.us API, not HTTP
+  public_notice: {
+    container_behavior: 'api',
+    max_child_fetches: 0,
+    max_leads: 10,
+    prefer_child_types: [],
+    allowed_object_types: ['solicitation', 'project', 'development_potential', 'news_item'],
+    blocked_object_types: [],
+    dashboard_lane: 'active_leads',
+    ignore_patterns: ['notice to creditors', 'estate notice', 'foreclosure', 'trustee sale', 'abandoned vehicle', 'name change', 'summons'],
+  },
 };
 
 function getSourceProfile(src) {
@@ -135,6 +146,197 @@ function profileAllowsObjectType(profile, objectType) {
   if (profile.blocked_object_types?.includes(objectType)) return false;
   if (profile.allowed_object_types?.length > 0) return profile.allowed_object_types.includes(objectType);
   return true;
+}
+
+// ── v4-b15: Public-notice ingestion via Column.us API ────────
+// Fetches newspaper public notices directly from the Column.us Elasticsearch API.
+// No headless browser needed — the API is publicly accessible.
+const COLUMN_API_URL = 'https://us-central1-enotice-production.cloudfunctions.net/api/search/public-notices';
+
+// Notice types relevant to A&E BD
+const PROCUREMENT_NOTICE_TYPES = ['Invitation to Bid', 'Request for Proposal', 'RFQ (Request for Qualifications)'];
+const DEVELOPMENT_NOTICE_TYPES = ['Notice of Hearing', 'Notice of Development', 'Notice of Election', 'Notice of Proposed Budget'];
+const ALL_RELEVANT_NOTICE_TYPES = [...PROCUREMENT_NOTICE_TYPES, ...DEVELOPMENT_NOTICE_TYPES];
+
+async function fetchPublicNotices(src, log = () => {}) {
+  const profile = src.source_profile || {};
+  const newspaperName = profile.newspaper_name || 'Missoulian';
+  const noticeTypes = profile.notice_types || PROCUREMENT_NOTICE_TYPES;
+  const daysBack = profile.days_back || 30;
+  const pageSize = profile.max_notices || 20;
+
+  const now = Date.now();
+  const startTs = now - (daysBack * 24 * 60 * 60 * 1000);
+
+  const body = {
+    search: '',
+    allFilters: [
+      { publishedtimestamp: { from: startTs, to: now } },
+      { noticetype: noticeTypes },
+      { newspapername: [newspaperName] },
+    ],
+    noneFilters: [],
+    sort: [{ publishedtimestamp: 'desc' }],
+    pageSize,
+    current: 1,
+    isDemo: false,
+  };
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const resp = await fetch(COLUMN_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+
+    if (!resp.ok) {
+      log(`  ✗ Column API HTTP ${resp.status}`);
+      return { ok: false, err: `HTTP ${resp.status}`, notices: [] };
+    }
+
+    const data = await resp.json();
+    if (!data.success || !data.results) {
+      log(`  ✗ Column API returned no results`);
+      return { ok: false, err: 'No results', notices: [] };
+    }
+
+    const notices = data.results.map(r => ({
+      text: r.text || '',
+      noticeType: r.noticetype || '',
+      newspaper: r.newspapername || '',
+      county: r.county || '',
+      state: r.state || '',
+      publishedTimestamp: r.publishedtimestamp || 0,
+      publishedDate: r.publishedtimestamp ? new Date(r.publishedtimestamp).toISOString().split('T')[0] : '',
+      pdfUrl: r.pdfurl || '',
+      noticeId: r.id || '',
+    }));
+
+    log(`  ✓ Column API: ${notices.length} notices (of ${data.page?.total_results || '?'} total)`);
+    return { ok: true, notices, totalResults: data.page?.total_results || notices.length };
+  } catch (err) {
+    log(`  ✗ Column API error: ${err.message}`);
+    return { ok: false, err: err.message, notices: [] };
+  }
+}
+
+// Extract a lead from a public notice
+function extractLeadFromNotice(notice, src) {
+  const text = (notice.text || '').trim();
+  if (text.length < 20) return null;
+
+  // Extract title: first line or first sentence
+  const firstLine = text.split('\n').find(l => l.trim().length > 10) || '';
+  let title = cleanTitle(firstLine.trim().slice(0, 150));
+
+  // If title still looks like the notice type prefix, extract the real project name
+  if (/^(invitation to bid|rfp|rfq|request for|notice of)\s*[-–—:]\s*/i.test(title)) {
+    title = title.replace(/^(invitation to bid|rfp|rfq|request for\s+\w+|notice of\s+\w+)\s*[-–—:]\s*/i, '').trim();
+  }
+  if (!title || title.length < 8) return null;
+
+  // Validate title
+  const vlt = validateLiveTitle(title);
+  if (!vlt.pass) return null;
+  if (isNavigationJunk(title)) return null;
+
+  // Extract description: remaining text after first line, max 400 chars
+  const descLines = text.split('\n').slice(1).join(' ').replace(/\s+/g, ' ').trim();
+  const description = descLines.slice(0, 400);
+
+  // Extract dates
+  const dueDateMatch = text.match(/(?:due|deadline|received|submit)\s+(?:by|before|no later than|until)\s+([A-Z][a-z]+\.?\s+\d{1,2},?\s*\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  const actionDueDate = dueDateMatch ? dueDateMatch[1] : '';
+
+  // Determine lane routing based on notice type
+  const isProcurement = PROCUREMENT_NOTICE_TYPES.includes(notice.noticeType);
+  const isDevelopment = DEVELOPMENT_NOTICE_TYPES.includes(notice.noticeType);
+  const dashboardLane = isProcurement ? 'active_leads' : isDevelopment ? 'development_potentials' : 'news';
+
+  // Determine lead class
+  const leadClass = isProcurement ? 'active_solicitation' : 'watch_signal';
+  const status = isProcurement ? 'active' : 'watch';
+
+  // Infer market from text
+  const lo = text.toLowerCase();
+  let marketSector = 'Other';
+  if (/\b(school|elementary|middle school|high school|k-12)\b/.test(lo)) marketSector = 'K-12';
+  else if (/\b(university|college|campus)\b/.test(lo)) marketSector = 'Higher Education';
+  else if (/\b(hospital|clinic|medical|healthcare)\b/.test(lo)) marketSector = 'Healthcare';
+  else if (/\b(fire station|police|public safety)\b/.test(lo)) marketSector = 'Public Safety';
+  else if (/\b(courthouse|city hall|civic|municipal|county)\b/.test(lo)) marketSector = 'Civic';
+  else if (/\b(housing|affordable|residential|apartment)\b/.test(lo)) marketSector = 'Housing';
+  else if (/\b(redevelopment|urban renewal|tif|urd)\b/.test(lo)) marketSector = 'Mixed Use';
+  else if (/\b(construction|renovation|building|facility|project)\b/.test(lo)) marketSector = 'Civic';
+
+  // A&E relevance check — skip non-A&E notices
+  const hasAERelevance = /\b(construction|renovation|building|facility|design|architect|engineer|rfq|rfp|bid|capital|project|inspection|testing|infrastructure)\b/i.test(lo);
+  if (!hasAERelevance) return null;
+
+  const id = `lead-notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const now = new Date().toISOString();
+
+  return {
+    id,
+    title,
+    owner: notice.newspaper || 'Missoulian',
+    projectName: title,
+    location: notice.county ? `${notice.county}, ${notice.state || 'MT'}` : (src.city ? `${src.city}, MT` : 'Missoula, MT'),
+    county: notice.county || src.county || 'Missoula',
+    marketSector,
+    projectType: isProcurement ? 'RFQ/RFP' : 'Other',
+    description: description ? `${description} — Source: Newspaper public notice (${notice.newspaper})` : `Public notice: ${title}`,
+    whyItMatters: isProcurement
+      ? `Public notice published in ${notice.newspaper} — active procurement opportunity. Review scope and deadline.`
+      : `Public notice published in ${notice.newspaper} — development/planning signal for monitoring.`,
+    aiReasonForAddition: `Newspaper public notice (${notice.noticeType}) published ${notice.publishedDate}. Source: ${notice.newspaper}.`,
+    potentialTimeline: '',
+    potentialBudget: '',
+    action_due_date: actionDueDate,
+    relevanceScore: isProcurement ? 65 : 40,
+    pursuitScore: isProcurement ? 45 : 20,
+    sourceConfidenceScore: 70,
+    confidenceNotes: `Public notice from ${notice.newspaper} (${notice.noticeType}). Published ${notice.publishedDate}.`,
+    dateDiscovered: now,
+    originalSignalDate: notice.publishedDate || now,
+    lastCheckedDate: now,
+    status,
+    leadClass,
+    leadOrigin: 'public_notice',
+    dashboard_lane: dashboardLane,
+    watchCategory: isProcurement ? 'named_project' : 'development_program',
+    projectStatus: isProcurement ? 'active_solicitation' : 'future_watch',
+    extractionPath: 'public_notice_api',
+    sourceName: src.name || src.source_name || 'Missoulian Public Notices',
+    sourceUrl: src.url || src.source_url || '',
+    sourceId: src.id || src.source_id || '',
+    evidenceLinks: [src.url || src.source_url || 'https://missoulian.column.us/search'],
+    evidenceSourceLinks: [{ url: 'https://missoulian.column.us/search', label: 'Missoulian Public Notices', linkType: 'public_notice_portal' }],
+    evidenceSummary: `Public notice (${notice.noticeType}): ${title}. Published ${notice.publishedDate} in ${notice.newspaper}. ${description.slice(0, 200)}`,
+    matchedFocusPoints: [],
+    matchedKeywords: [],
+    matchedTargetOrgs: [],
+    taxonomyMatches: [],
+    internalContact: '',
+    notes: '',
+    evidence: [{
+      id: `ev-${id}`,
+      leadId: id,
+      sourceId: src.id || src.source_id || '',
+      sourceName: notice.newspaper,
+      url: 'https://missoulian.column.us/search',
+      title: `Public notice: ${title}`,
+      summary: `${notice.noticeType} published ${notice.publishedDate}. ${description.slice(0, 200)}`,
+      signalDate: notice.publishedDate || now,
+      dateFound: now,
+      signalStrength: isProcurement ? 'strong' : 'medium',
+      keywords: [],
+    }],
+  };
 }
 
 // ── v4-b6: News relevance filter ─────────────────────────────
@@ -1766,6 +1968,22 @@ function isAlreadyClaimed(title, ...contexts) {
     return { isClaimed: true, reason: 'completed_prefix', detail: 'Title begins with completion/award prefix' };
   }
 
+  // v4-b14: Standalone status labels — CivicEngage and similar pages show status as a label
+  // "Status: Awarded", "Awarded", "Solicitation Period Closed", "Closed", etc.
+  // These appear near the project title in the page content, not necessarily as "awarded to [firm]"
+  if (/\b(?:status\s*:\s*awarded|status\s*:\s*closed|solicitation\s+(?:period\s+)?closed|bid\s+(?:period\s+)?closed|submission\s+(?:period\s+)?closed|no\s+longer\s+accepting)\b/i.test(lo)) {
+    if (hasOpenSolicitation) return { isClaimed: false };
+    return { isClaimed: true, reason: 'status_closed', detail: 'Solicitation status shows Awarded or Closed' };
+  }
+  // Standalone "Awarded" near the title (within first 500 chars of context — likely a status field)
+  const nearTitle = lo.slice(0, 500);
+  if (/\bawarded\b/i.test(nearTitle) && !/\b(?:to\s+be\s+awarded|will\s+be\s+awarded|pending|not\s+yet|awaiting)\b/i.test(nearTitle)) {
+    // Only suppress if the word "Awarded" appears close to the title (status-like position)
+    // and the context does NOT contain open solicitation language
+    if (hasOpenSolicitation) return { isClaimed: false };
+    return { isClaimed: true, reason: 'status_awarded', detail: 'Awarded status detected near project title' };
+  }
+
   return { isClaimed: false };
 }
 
@@ -2589,10 +2807,16 @@ async function extractLeads(content, src, kws, fps, orgs, childLinks, log = () =
       // Skip obvious non-A&E items early: fuel bids, chip seal, mowing, etc.
       const anchorLo = anchor.toLowerCase();
       if (/\b(fuel (services?|bid)|chip seal|mowing|snow plow|janitorial|custodial|uniform|vehicle purchase|parts list)\b/i.test(anchorLo)) continue;
+      // v4-b14: Include parent page context near the child link anchor text
+      // so isAlreadyClaimed can detect status labels like "Awarded" and "Closed"
+      const anchorIdx = content.toLowerCase().indexOf(anchorLo.slice(0, 30));
+      const parentContext = anchorIdx >= 0
+        ? content.slice(Math.max(0, anchorIdx - 100), Math.min(content.length, anchorIdx + anchorLo.length + 200))
+        : anchor;
       containerChildCandidates.push({
         matchText: anchor,
-        fullContext: anchor,
-        wideContext: anchor,
+        fullContext: parentContext,
+        wideContext: parentContext,
         patternIndex: -1,
         extractionPath: 'container_child',
         headingTitle: anchor, // already cleaned by cleanTitle above
@@ -4614,13 +4838,56 @@ export default async function handler(req, res) {
     const addedTitles = [];
     const start = Date.now();
 
+    // v4-b13: Per-source health tracking
+    const sourceHealthMap = [];
+
     for (let i = 0; i < list.length; i++) {
       const src = list[i];
       log(`[${i+1}/${list.length}] ${src.name} (${src.url})`);
 
+      // v4-b15: Public-notice sources use Column.us API instead of HTTP fetch
+      const earlyProfile = getSourceProfile(src);
+      if (earlyProfile.profile_type === 'public_notice') {
+        const noticeResult = await fetchPublicNotices(src, log);
+        sourceHealthMap.push({ sourceId: src.id, status: noticeResult.ok ? 'healthy' : 'failing', error: noticeResult.err || null });
+        if (noticeResult.ok) {
+          fetchOk++;
+          parseHits++;
+          let noticeAdded = 0;
+          for (const notice of noticeResult.notices) {
+            const lead = extractLeadFromNotice(notice, src);
+            if (!lead) continue;
+            // Dedup against existing leads
+            const tl = lead.title.toLowerCase().trim();
+            if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
+            // Dedup against already-added leads in this scan
+            const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
+            if (isDupe) { skipDupe++; continue; }
+            // Title quality gates
+            if (isGenericNewsHeadline(lead.title)) { skipGenericTitle++; continue; }
+            if (isRetrospectiveTitle(lead.title)) { skipNotProjectSpecific++; continue; }
+            exSet.add(tl);
+            addedTitles.push(lead.title);
+            added.push(lead);
+            noticeAdded++;
+            log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}" | type=${notice.noticeType} | lane=${lead.dashboard_lane} | pub=${notice.publishedDate}`);
+          }
+          log(`  → ${noticeAdded} notice lead(s) added (${noticeResult.notices.length} notices fetched)`);
+        } else {
+          fetchFail++;
+        }
+        continue;
+      }
+
       const f = await fetchUrl(src.url);
-      if (!f.ok) { log(`  ✗ ${f.err||'HTTP '+f.status}`); fetchFail++; continue; }
+      if (!f.ok) {
+        log(`  ✗ ${f.err||'HTTP '+f.status}`);
+        fetchFail++;
+        sourceHealthMap.push({ sourceId: src.id, status: 'failing', error: f.err || `HTTP ${f.status}`, httpStatus: f.status });
+        continue;
+      }
       fetchOk++;
+      sourceHealthMap.push({ sourceId: src.id, status: 'healthy', httpStatus: f.status, contentLength: f.length });
       log(`  ✓ ${f.length} chars — "${f.title||'(no title)'}"`);
 
       const { pass, n, kw } = preFilter(f.content, src);
@@ -5013,6 +5280,8 @@ export default async function handler(req, res) {
       totalQualityBlocked: skipGenericTitle + skipPortalTitle + skipWeakAEFit + skipInfraOnly + skipNotProjectSpecific,
       sourcesFetched: fetchOk + fetchFail, fetchSuccesses: fetchOk, fetchFailures: fetchFail,
       parseHits, duration: dur, mode: 'live',
+      // v4-b13: Per-source health for frontend source registry updates
+      sourceHealth: sourceHealthMap,
     };
 
     log(`═══ DONE in ${(dur/1000).toFixed(1)}s ═══`);

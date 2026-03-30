@@ -1,39 +1,39 @@
 {
-  "timestamp": "2026-03-29T17:38:50.471Z",
-  "seedVersion": "2026-03-29-v4-b10-decompose",
+  "timestamp": "2026-03-29T22:08:23.670Z",
+  "seedVersion": "2026-03-29-v4-b15-public-notices",
   "duration": "43.0s",
-  "sourcesScanned": 58,
-  "fetchSuccesses": 56,
-  "fetchFailures": 2,
-  "leadsAdded": 9,
+  "sourcesScanned": 57,
+  "fetchSuccesses": 57,
+  "fetchFailures": 0,
+  "leadsAdded": 17,
   "leadsSuppressed": 39,
   "laneBreakdown": {
-    "development_potentials": 4,
-    "active_leads": 3,
-    "news": 2
+    "active_leads": 8,
+    "development_potentials": 5,
+    "news": 4
   },
   "statusBreakdown": {
-    "watch": 7,
-    "active": 2
+    "watch": 11,
+    "active": 6
   },
   "qualityGates": {
     "genericTitle": 38,
     "portalTitle": 0,
     "notProjectSpecific": 0,
     "lowQuality": 1,
-    "duplicate": 0,
+    "duplicate": 6,
     "totalBlocked": 38
   },
   "suppressionReasons": {
     "below_relevance_threshold": 1,
     "annual_report": 1,
-    "vlt_trailing_period": 14,
+    "vlt_trailing_period": 15,
     "vlt_ui_fragment": 2,
     "facility_rental": 1,
-    "org_name_title": 2,
     "vlt_explanatory_clause": 1,
     "vlt_truncated_ellipsis": 2,
     "it_website_project": 2,
+    "org_name_title": 1,
     "park_equipment": 1,
     "recreation_program": 1,
     "outdated_plan": 1,
@@ -42,6 +42,21 @@
     "fee_schedule": 1
   },
   "leads": [
+    {
+      "title": "Community Development Partnerships",
+      "sourceId": "MT-MIS-004",
+      "lane": "active_leads",
+      "status": "watch",
+      "relevanceScore": 34,
+      "pursuitScore": 17,
+      "description": "Funded by an award of $1.3 million dollars from the Science Education Partnership Award (SEPA) program of the National Institutes Health , Missoula is the first city in the nation to receive a SEPA grant. Together with our community, the LINK is creating a dynamic health-science learning hub in the ",
+      "evidence": "Project signal: Project detail found via Community Planning, Development & Innovation (planning & zoning records). Direct project detail: \"Community Development Partnerships\". Artifact path: Community",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "redevelopment_area"
+    },
     {
       "title": "Scott Street Project",
       "sourceId": "MT-MEP-002",
@@ -64,6 +79,21 @@
       "status": "watch",
       "relevanceScore": 56,
       "pursuitScore": 31,
+      "description": "Southgate Crossing is intended to be a vibrant redevelopment project that integrates residential and recreational spaces to enhance the overall vitality of Midtown Missoula. Midtown Master Plan Southgate Draft Development Plan A plan developed by Southgate Mall Associates in partnership with MRA to ",
+      "evidence": "Project signal: Solicitation found via Invest in Transformation (redevelopment/economic development). Direct solicitation: \"Southgate Crossing - Solicitation Period Closed\". Artifact path: Invest in T",
+      "location": "Missoula, MT",
+      "marketSector": "Mixed Use",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Southgate Crossing Dev Site Brief",
+      "sourceId": "MT-MEP-002",
+      "lane": "development_potentials",
+      "status": "watch",
+      "relevanceScore": 46,
+      "pursuitScore": 26,
       "description": "Southgate Crossing is intended to be a vibrant redevelopment project that integrates residential and recreational spaces to enhance the overall vitality of Midtown Missoula. Midtown Master Plan Southgate Draft Development Plan A plan developed by Southgate Mall Associates in partnership with MRA to ",
       "evidence": "Project signal: Solicitation found via Invest in Transformation (redevelopment/economic development). Direct solicitation: \"Southgate Crossing - Solicitation Period Closed\". Artifact path: Invest in T",
       "location": "Missoula, MT",
@@ -103,32 +133,124 @@
       "watchCategory": "redevelopment_area"
     },
     {
+      "title": "Bridger View Development",
+      "sourceId": "MT-CON-002",
+      "lane": "news",
+      "status": "watch",
+      "relevanceScore": 40,
+      "pursuitScore": 29,
+      "description": "Bridger View Development — Source: Contractor portfolio",
+      "evidence": "Project signal: Project detail found via Langlas & Associates — Project Gallery (contractor portfolio). Direct project detail: \"Bridger View Development\". Artifact path: Langlas & Associates — Project",
+      "location": "Billings, MT",
+      "marketSector": "Healthcare",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Development at Ferguson Farms",
+      "sourceId": "MT-CON-002",
+      "lane": "news",
+      "status": "watch",
+      "relevanceScore": 38,
+      "pursuitScore": 28,
+      "description": "Development at Ferguson Farms — Source: Contractor portfolio",
+      "evidence": "Project signal: Project detail found via Langlas & Associates — Project Gallery (contractor portfolio). Direct project detail: \"The Development at Ferguson Farms\". Artifact path: Langlas & Associates ",
+      "location": "Bozeman, MT",
+      "marketSector": "K-12",
+      "projectType": "Other",
+      "leadClass": "watch_signal",
+      "watchCategory": "named_project"
+    },
+    {
       "title": "FY27 COMPASS Commission Facilitaton RFP",
       "sourceId": "MT-MCO-008",
       "lane": "active_leads",
       "status": "active",
-      "relevanceScore": 74,
-      "pursuitScore": 54,
+      "relevanceScore": 78,
+      "pursuitScore": 69,
       "description": "The Steering Committee has approved up to twenty-five thousand dollars ($25,000) for the support of the COMPASS project, to be allocated across administration, design, meeting costs, and other similar functions/costs. Offeror Phone Number: Offeror FAX Number (if applicable): Offeror Email Address: O",
       "evidence": "Active solicitation: Solicitation found via Missoula County — Bids & Proposals (Auditor) (procurement portal). Direct solicitation: \"FY27 COMPASS Commission Facilitaton RFP\". Key finding: The Steering",
       "location": "Missoula, MT",
-      "marketSector": "Civic",
+      "marketSector": "Public Safety",
       "projectType": "RFQ/RFP",
-      "leadClass": "active_solicitation"
+      "leadClass": "active_solicitation",
+      "watchCategory": "tif_district"
     },
     {
-      "title": "Missoula Public Health Enviromental Health Lobby &amp; Office Upgrades RFP",
-      "sourceId": "MT-MCO-008",
+      "title": "RFP Construction Inspection & Testing",
+      "sourceId": "MT-NOTICE-001",
       "lane": "active_leads",
       "status": "active",
-      "relevanceScore": 84,
-      "pursuitScore": 59,
-      "description": "Missoula County has a construction budget of $350,000.00 for this project. The purpose of this project is to make better use of the 2nd floor office space for the staff, along with upgrading the lobby area to be more welcoming to the public, while also upgrading the area to incorporate ADA standards",
-      "evidence": "Active solicitation: Solicitation found via Missoula County — Bids & Proposals (Auditor) (procurement portal). Direct solicitation: \"Missoula Public Health Enviromental Health Lobby &amp; Office Upgra",
-      "location": "Missoula, MT",
-      "marketSector": "Commercial",
+      "relevanceScore": 65,
+      "pursuitScore": 45,
+      "description": "Mountain Line is accepting bids from qualified contractors for construction inspection and testing services. Submissions are due at 3 p.m. MDT on April 8, 2026. www.mountainline.com [http://www.mountainline.com] for more information. March 28 April 4, 11, 2026 COL-MT-402068 MNAXLP — Source: Newspape",
+      "evidence": "Public notice (Invitation to Bid): RFP Construction Inspection & Testing. Published 2026-03-28 in Missoulian. Mountain Line is accepting bids from qualified contractors for construction inspection and",
+      "location": "Missoula, Montana",
+      "marketSector": "Civic",
       "projectType": "RFQ/RFP",
-      "leadClass": "active_solicitation"
+      "leadClass": "active_solicitation",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Lower Grant Creek Restoration Phase 1, Missoula, Montana",
+      "sourceId": "MT-NOTICE-001",
+      "lane": "active_leads",
+      "status": "active",
+      "relevanceScore": 65,
+      "pursuitScore": 45,
+      "description": "The Clark Fork Coalition (CFC) invites you to bid on the Lower Grant Creek Restoration Phase 1 project near Missoula, Montana. The project includes channel realignment, floodplain grading and enhancement, installation of a woody‑debris matrix, willow brush trench construction, temporary flow diversi",
+      "evidence": "Public notice (Invitation to Bid): Lower Grant Creek Restoration Phase 1, Missoula, Montana. Published 2026-03-24 in Missoulian. The Clark Fork Coalition (CFC) invites you to bid on the Lower Grant Cr",
+      "location": "Missoula, Montana",
+      "marketSector": "Civic",
+      "projectType": "RFQ/RFP",
+      "leadClass": "active_solicitation",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "Construction Inspection & Testing Services",
+      "sourceId": "MT-NOTICE-001",
+      "lane": "active_leads",
+      "status": "active",
+      "relevanceScore": 65,
+      "pursuitScore": 45,
+      "description": "Mountain Line is accepting bids from qualified contractors for construction inspection and testing services. Submit proposals by 3 p.m. MDT on 3/18/26. Visit mountainline.com for more information. March 7, 14, 21, 2026 COL-MT-402012 MNAXLP — Source: Newspaper public notice (Missoulian)",
+      "evidence": "Public notice (Invitation to Bid): Construction Inspection & Testing Services. Published 2026-03-21 in Missoulian. Mountain Line is accepting bids from qualified contractors for construction inspectio",
+      "location": "Missoula, Montana",
+      "marketSector": "Civic",
+      "projectType": "RFQ/RFP",
+      "leadClass": "active_solicitation",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "City of Missoula Parks and Recreation RFP",
+      "sourceId": "MT-NOTICE-001",
+      "lane": "active_leads",
+      "status": "active",
+      "relevanceScore": 65,
+      "pursuitScore": 45,
+      "description": "City of Missoula Park and Recreation is seeking proposals for concession operators. All proposals must be received no later than Friday, March 27, 2026, at 4:00 PM. A copy of the RFP can be accessed at www.ci.missoula.mt.us/bids. March 7, 14, 21, 2026 COL-MT-402010 MNAXLP — Source: Newspaper public ",
+      "evidence": "Public notice (Invitation to Bid): City of Missoula Parks and Recreation RFP. Published 2026-03-21 in Missoulian. City of Missoula Park and Recreation is seeking proposals for concession operators. Al",
+      "location": "Missoula, Montana",
+      "marketSector": "Other",
+      "projectType": "RFQ/RFP",
+      "leadClass": "active_solicitation",
+      "watchCategory": "named_project"
+    },
+    {
+      "title": "MSO - Invitation to Bid",
+      "sourceId": "MT-NOTICE-001",
+      "lane": "active_leads",
+      "status": "active",
+      "relevanceScore": 65,
+      "pursuitScore": 45,
+      "description": "MISSSOULA COUNTY AIRPORT AUTHORITY MISSOULA MONTANA AIRPORT INVITATION TO BID The Missoula County Airport Authority (MCAA) is formally requesting electronic bids for construction services for the Taxiway H Conversion Project, AIP 3-30-0056-097-2026. The Airport will select one contractor based on th",
+      "evidence": "Public notice (Invitation to Bid): MSO - Invitation to Bid. Published 2026-03-17 in Missoulian. MISSSOULA COUNTY AIRPORT AUTHORITY MISSOULA MONTANA AIRPORT INVITATION TO BID The Missoula County Airpor",
+      "location": "Missoula, Montana",
+      "marketSector": "Civic",
+      "projectType": "RFQ/RFP",
+      "leadClass": "active_solicitation",
+      "watchCategory": "named_project"
     },
     {
       "title": "Missoula Housing Authority — Development Projects",
@@ -208,19 +330,9 @@
       "relevanceScore": 57
     },
     {
-      "title": "Development Opportunities",
-      "reason": "org_name_title",
-      "relevanceScore": 56
-    },
-    {
       "title": "Development project that Missoulians and neighborhood residents can be proud...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 46
-    },
-    {
-      "title": "Development project and welcome all creative ideas and partners to get that...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 28
     },
     {
       "title": "City of Missoula in 2020 to encourage development",
@@ -283,19 +395,29 @@
       "relevanceScore": 26
     },
     {
-      "title": "School Improvements YMCA Wellness Center Addition Florence Carlton School...",
+      "title": "Spital Historic Renovation Clinton School Addition Renovation Cattail Corner...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 73
     },
     {
-      "title": "Community Hospital Missoula Country Club Renovation Garlington Lohn Robinson...",
+      "title": "…nce Carlton School Services Primary Bath Renovation Farmers State Bank...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 73
     },
     {
-      "title": "Sevelt Saloon Renovation ESI Laser Tenant Improvement Settlement I (Private...",
+      "title": "…ents Missoula County Courthouse Historic Renovation Jacobson Office Building...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 76
+    },
+    {
+      "title": "Paul Lutheran Church Renovation Hellgate Elementary School District New...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 62
+    },
+    {
+      "title": "School Addition National Institute of Health Rocky Mountain Laboratories...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 73
     },
     {
       "title": "2008 Master Plan",
