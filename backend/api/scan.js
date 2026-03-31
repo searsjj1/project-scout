@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.17-20260330-teddcomplete-b21';
+const SCAN_BUILD_ID = 'scan-v4.18-20260330-dashboardlayout-b22';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.

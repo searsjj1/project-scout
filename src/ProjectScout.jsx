@@ -2664,19 +2664,126 @@ function ActiveLeadsTab({ leads, onSelectLead, onUpdateLead, batchMode, batchSel
                     </div>
                   </div>
 
-                  {/* Lane order: Development/Project Potentials → News → Active Project Leads */}
-                  <LaneSubSection
-                    icon={<MapPin size={13} style={{ color: '#1d4ed8' }} />}
-                    title="Development / Project Potentials"
-                    color="#1d4ed8" bg="#dbeafe" borderColor="#93c5fd"
-                    leads={watchDevPotentials}
-                  />
-                  <LaneSubSection
-                    icon={<Radio size={13} style={{ color: '#0f766e' }} />}
-                    title="Missoula News"
-                    color="#0f766e" bg="#ccfbf1" borderColor="#5eead4"
-                    leads={watchNews}
-                  />
+                  {/* v4-b22: Split Development/Project Potentials into purpose-driven sections */}
+                  {(() => {
+                    // Classify dev-potentials into sub-categories
+                    // Budget items classified FIRST so "Budget — URD III..." goes to Budget, not Strategic Districts
+                    const budgetSignals = watchDevPotentials.filter(l =>
+                      /^budget\s/i.test(l.title || '') || l.watchCategory === 'capital_budget'
+                    );
+                    const strategicDistricts = watchDevPotentials.filter(l =>
+                      !budgetSignals.includes(l) && (
+                        l.watchCategory === 'tif_district' || l.watchCategory === 'redevelopment_area' ||
+                        l.leadClass === 'strategic_watch' ||
+                        /\b(urd|tedd|urban\s+renewal)\b/i.test(l.title || '')
+                      )
+                    );
+                    const namedProjects = watchDevPotentials.filter(l =>
+                      !strategicDistricts.includes(l) && !budgetSignals.includes(l)
+                    );
+
+                    return (
+                      <>
+                        {/* Strategic Districts — URDs + TEDDs */}
+                        {strategicDistricts.length > 0 && (
+                          <div style={{ marginTop: 28 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Target size={14} style={{ color: '#7c3aed' }} />
+                                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Strategic Districts</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8, background: '#ede9fe', color: '#7c3aed' }}>{strategicDistricts.length}</span>
+                              </div>
+                              <div style={{ flex: 1, height: 1, background: '#c4b5fd' }} />
+                              <span style={{ fontSize: 10, color: '#a78bfa', fontWeight: 500 }}>URDs · TEDDs · Redevelopment Areas</span>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10, padding: '12px', background: '#faf5ff20', borderRadius: 12, border: '1px solid #e9d5ff40' }}>
+                              {strategicDistricts.map((lead, i) => {
+                                const disp = getWatchDisposition(lead);
+                                return (
+                                  <LeadCard key={lead.id} lead={lead} onClick={() => onSelectLead(lead)}
+                                    batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
+                                    style={{ opacity: disp === WATCH_DISPOSITION.MUTED || disp === WATCH_DISPOSITION.DISMISSED ? 0.5 : 1, borderLeft: '3px solid #7c3aed' }}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Named Project Potentials */}
+                        <LaneSubSection
+                          icon={<MapPin size={13} style={{ color: '#1d4ed8' }} />}
+                          title="Named Project Potentials"
+                          color="#1d4ed8" bg="#dbeafe" borderColor="#93c5fd"
+                          leads={namedProjects}
+                        />
+
+                        {/* Budget / CIP Signals */}
+                        {budgetSignals.length > 0 && (
+                          <div style={{ marginTop: 28 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <DollarSign size={13} style={{ color: '#b45309' }} />
+                                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Budget / CIP Signals</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8, background: '#fef3c7', color: '#b45309' }}>{budgetSignals.length}</span>
+                              </div>
+                              <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: '#fffbeb20', borderRadius: 10, border: '1px solid #fde68a40' }}>
+                              {budgetSignals.map(lead => (
+                                <div key={lead.id} onClick={() => onSelectLead(lead)} style={{
+                                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#fff',
+                                  borderRadius: 8, border: '1px solid #f1f5f9', cursor: 'pointer',
+                                  transition: 'all 0.15s',
+                                }}
+                                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#fde68a'; e.currentTarget.style.background = '#fffbeb'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.background = '#fff'; }}
+                                >
+                                  <DollarSign size={12} style={{ color: '#b45309', flexShrink: 0 }} />
+                                  <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanHtmlEntities(lead.title)}</span>
+                                  <span style={{ fontSize: 10, color: '#94a3b8', flexShrink: 0 }}>{lead.potentialBudget || ''}</span>
+                                  <ScoreRing score={lead.relevanceScore || 0} size={28} strokeWidth={2.5} />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  {/* News / Market Signals — compact rows */}
+                  {watchNews.length > 0 && (
+                    <div style={{ marginTop: 28 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Radio size={13} style={{ color: '#0f766e' }} />
+                          <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Missoula News</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 8, background: '#ccfbf1', color: '#0f766e' }}>{watchNews.length}</span>
+                        </div>
+                        <div style={{ flex: 1, height: 1, background: '#5eead4' }} />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: '#f0fdfa20', borderRadius: 10, border: '1px solid #5eead440' }}>
+                        {watchNews.map(lead => (
+                          <div key={lead.id} onClick={() => onSelectLead(lead)} style={{
+                            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#fff',
+                            borderRadius: 8, border: '1px solid #f1f5f9', cursor: 'pointer',
+                            transition: 'all 0.15s',
+                          }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = '#5eead4'; e.currentTarget.style.background = '#f0fdfa'; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.background = '#fff'; }}
+                          >
+                            <Radio size={11} style={{ color: '#0f766e', flexShrink: 0 }} />
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanHtmlEntities(lead.title)}</span>
+                            {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8', flexShrink: 0, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.sourceName}</span>}
+                            <ScoreRing score={lead.relevanceScore || 0} size={28} strokeWidth={2.5} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Active Project Leads */}
                   <LaneSubSection
                     icon={<Activity size={13} style={{ color: '#065f46' }} />}
                     title="Active Project Leads"

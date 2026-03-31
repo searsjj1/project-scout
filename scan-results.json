@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-03-30T21:55:50.242Z",
+  "timestamp": "2026-03-31T15:24:41.653Z",
   "seedVersion": "2026-03-30-v4-b20-teddcoverage",
-  "duration": "168.0s",
+  "duration": "50.8s",
   "sourcesScanned": 64,
   "fetchSuccesses": 64,
   "fetchFailures": 0,
   "leadsAdded": 31,
-  "leadsSuppressed": 39,
+  "leadsSuppressed": 41,
   "laneBreakdown": {
     "development_potentials": 20,
     "news": 4,
@@ -17,17 +17,17 @@
     "active": 5
   },
   "qualityGates": {
-    "genericTitle": 38,
+    "genericTitle": 40,
     "portalTitle": 0,
     "notProjectSpecific": 1,
     "lowQuality": 0,
     "duplicate": 6,
-    "totalBlocked": 39
+    "totalBlocked": 41
   },
   "suppressionReasons": {
     "program_not_project": 1,
     "org_name_title": 3,
-    "vlt_trailing_period": 10,
+    "vlt_trailing_period": 11,
     "annual_report": 1,
     "vlt_ui_fragment": 2,
     "facility_rental": 1,
@@ -35,6 +35,7 @@
     "park_equipment": 1,
     "recreation_program": 1,
     "educational_comparison": 1,
+    "vlt_truncated_ellipsis": 1,
     "outdated_plan": 1,
     "school_admin_content": 6,
     "standalone_school_name": 3,
@@ -583,19 +584,29 @@
       "relevanceScore": 36
     },
     {
-      "title": "Sky Missoula County Courthouse Historic Renovation Public Safety Building...",
+      "title": "Paul Lutheran Church Renovation Lone Peak High School Phase 1 Settlement I...",
       "reason": "vlt_trailing_period",
-      "relevanceScore": 73
+      "relevanceScore": 76
     },
     {
-      "title": "Paul Lutheran Church Renovation Hamilton High School Sports Complex Missoula...",
+      "title": "…ellow Elementary School Roosevelt Saloon Renovation Hellgate Elementary...",
       "reason": "vlt_trailing_period",
-      "relevanceScore": 73
+      "relevanceScore": 76
     },
     {
-      "title": "Dream Services Primary Bath Renovation Berkshire Hathaway Home Services...",
+      "title": "…ckson Headquarters Addition Phase 2 Dahl Funeral Home Renovation DJ A Office...",
       "reason": "vlt_trailing_period",
-      "relevanceScore": 73
+      "relevanceScore": 76
+    },
+    {
+      "title": "…t Glasgow Remodel and Addition Clinton School Addition Renovation Missoula...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 76
+    },
+    {
+      "title": "…r High School Addition Providence Clinical Decision Unit St",
+      "reason": "vlt_truncated_ellipsis",
+      "relevanceScore": 76
     },
     {
       "title": "2008 Master Plan",
