@@ -1,19 +1,19 @@
 {
-  "timestamp": "2026-03-31T15:24:41.653Z",
+  "timestamp": "2026-04-07T02:49:43.661Z",
   "seedVersion": "2026-03-30-v4-b20-teddcoverage",
-  "duration": "50.8s",
+  "duration": "61.4s",
   "sourcesScanned": 64,
   "fetchSuccesses": 64,
   "fetchFailures": 0,
-  "leadsAdded": 31,
+  "leadsAdded": 29,
   "leadsSuppressed": 41,
   "laneBreakdown": {
     "development_potentials": 20,
-    "news": 4,
-    "active_leads": 7
+    "active_leads": 7,
+    "news": 2
   },
   "statusBreakdown": {
-    "watch": 26,
+    "watch": 24,
     "active": 5
   },
   "qualityGates": {
@@ -21,13 +21,13 @@
     "portalTitle": 0,
     "notProjectSpecific": 1,
     "lowQuality": 0,
-    "duplicate": 6,
+    "duplicate": 7,
     "totalBlocked": 41
   },
   "suppressionReasons": {
     "program_not_project": 1,
     "org_name_title": 3,
-    "vlt_trailing_period": 11,
+    "vlt_trailing_period": 10,
     "annual_report": 1,
     "vlt_ui_fragment": 2,
     "facility_rental": 1,
@@ -35,7 +35,7 @@
     "park_equipment": 1,
     "recreation_program": 1,
     "educational_comparison": 1,
-    "vlt_truncated_ellipsis": 1,
+    "out_of_missoula_geography": 2,
     "outdated_plan": 1,
     "school_admin_content": 6,
     "standalone_school_name": 3,
@@ -212,42 +212,12 @@
       "watchCategory": "redevelopment_area"
     },
     {
-      "title": "Bridger View Development",
-      "sourceId": "MT-CON-002",
-      "lane": "news",
-      "status": "watch",
-      "relevanceScore": 40,
-      "pursuitScore": 29,
-      "description": "Bridger View Development — Source: Contractor portfolio",
-      "evidence": "Project signal: Project detail found via Langlas & Associates — Project Gallery (contractor portfolio). Direct project detail: \"Bridger View Development\". Artifact path: Langlas & Associates — Project",
-      "location": "Billings, MT",
-      "marketSector": "Healthcare",
-      "projectType": "Other",
-      "leadClass": "watch_signal",
-      "watchCategory": "named_project"
-    },
-    {
-      "title": "Development at Ferguson Farms",
-      "sourceId": "MT-CON-002",
-      "lane": "news",
-      "status": "watch",
-      "relevanceScore": 38,
-      "pursuitScore": 28,
-      "description": "Development at Ferguson Farms — Source: Contractor portfolio",
-      "evidence": "Project signal: Project detail found via Langlas & Associates — Project Gallery (contractor portfolio). Direct project detail: \"The Development at Ferguson Farms\". Artifact path: Langlas & Associates ",
-      "location": "Bozeman, MT",
-      "marketSector": "K-12",
-      "projectType": "Other",
-      "leadClass": "watch_signal",
-      "watchCategory": "named_project"
-    },
-    {
       "title": "North Riverside Parks/Trails Project",
       "sourceId": "MT-MIS-012",
       "lane": "active_leads",
       "status": "watch",
       "relevanceScore": 71,
-      "pursuitScore": 52,
+      "pursuitScore": 62,
       "description": "Construction will resume in Spring 2025, the project is approximately 60% complete. Downtown SAM Improvements The Downtown SAM project includes major improvements to Ron s River Trail from Front Street into Kiwanis Park and an ADA-accessible ramp from the east side of Beartracks Bridge to East Caras",
       "evidence": "Project signal: Project detail found via City of Missoula — Parks & Recreation (institutional/campus records). Direct project detail: \"North Riverside Parks/Trails Project\". Key finding: Construction ",
       "location": "Missoula, MT",
@@ -294,7 +264,7 @@
       "relevanceScore": 65,
       "pursuitScore": 45,
       "description": "Mountain Line is accepting bids from qualified contractors for construction inspection and testing services. Submissions are due at 3 p.m. MDT on April 8, 2026. www.mountainline.com [http://www.mountainline.com] for more information. March 28 April 4, 11, 2026 COL-MT-402068 MNAXLP — Source: Newspape",
-      "evidence": "Public notice (Invitation to Bid): RFP Construction Inspection & Testing. Published 2026-03-28 in Missoulian. Mountain Line is accepting bids from qualified contractors for construction inspection and",
+      "evidence": "Public notice (Invitation to Bid): RFP Construction Inspection & Testing. Published 2026-04-04 in Missoulian. Mountain Line is accepting bids from qualified contractors for construction inspection and",
       "location": "Missoula, Montana",
       "marketSector": "Civic",
       "projectType": "RFQ/RFP",
@@ -584,34 +554,34 @@
       "relevanceScore": 36
     },
     {
-      "title": "Paul Lutheran Church Renovation Lone Peak High School Phase 1 Settlement I...",
+      "title": "…ncil Office Renovation University of Montana Western Main Hall Grant Creek...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 76
     },
     {
-      "title": "…ellow Elementary School Roosevelt Saloon Renovation Hellgate Elementary...",
+      "title": "…ny Hellgate High School Renovation The Springs-Missoula Pioneer Middle...",
       "reason": "vlt_trailing_period",
       "relevanceScore": 76
     },
     {
-      "title": "…ckson Headquarters Addition Phase 2 Dahl Funeral Home Renovation DJ A Office...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 76
+      "title": "Bridger View Development",
+      "reason": "out_of_missoula_geography",
+      "relevanceScore": 40
     },
     {
-      "title": "…t Glasgow Remodel and Addition Clinton School Addition Renovation Missoula...",
-      "reason": "vlt_trailing_period",
-      "relevanceScore": 76
-    },
-    {
-      "title": "…r High School Addition Providence Clinical Decision Unit St",
-      "reason": "vlt_truncated_ellipsis",
-      "relevanceScore": 76
+      "title": "Development at Ferguson Farms",
+      "reason": "out_of_missoula_geography",
+      "relevanceScore": 38
     },
     {
       "title": "2008 Master Plan",
       "reason": "outdated_plan",
-      "relevanceScore": 53
+      "relevanceScore": 51
+    },
+    {
+      "title": "Nformation At MSO About Us nt Explore MSO Master Plan Security Badging...",
+      "reason": "vlt_trailing_period",
+      "relevanceScore": 58
     },
     {
       "title": "In-District High School Transfer Information",
@@ -686,7 +656,7 @@
     {
       "title": "Blackfoot Crossing Riverfront Public Notice",
       "reason": "news_not_relevant",
-      "relevanceScore": 34
+      "relevanceScore": 30
     },
     {
       "title": "Mmendations to City Council regarding the development, adoption, amendment,...",

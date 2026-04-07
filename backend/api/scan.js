@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.18-20260330-dashboardlayout-b22';
+const SCAN_BUILD_ID = 'scan-v4.19-20260330-missoulaonly-b23';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -5234,6 +5234,24 @@ export default async function handler(req, res) {
           suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'outdated_plan' });
           log(`    ⊘ BLOCKED (outdated plan): ${c.title.slice(0,60)}`);
           continue;
+        }
+        // v4-b23: Testimonial/marketing language suppression
+        if (/\b(excellent choice|great experience|highly recommend|wonderful|amazing|fantastic|pleasure to work|look forward to|thank you for|trusted partner|premier|leading provider|best in class)\b/i.test(clo) &&
+            !/\b(rfq|rfp|solicitation|renovation|construction|design|project|facility|building)\b/i.test(clo)) {
+          skipGenericTitle++;
+          suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'testimonial_marketing' });
+          log(`    ⊘ BLOCKED (testimonial/marketing): ${c.title.slice(0,60)}`);
+          continue;
+        }
+        // v4-b23: Out-of-Missoula contractor/news items — suppress leads with explicit non-Missoula locations
+        if (/\b(billings|bozeman|helena|great falls|kalispell|butte|spokane|boise|idaho falls|coeur d.alene|seattle)\b/i.test(c.location || '')) {
+          // Allow through only if title explicitly mentions Missoula
+          if (!/missoula/i.test(c.title || '')) {
+            skipGenericTitle++;
+            suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'out_of_missoula_geography' });
+            log(`    ⊘ BLOCKED (out of Missoula geography: ${c.location}): ${c.title.slice(0,60)}`);
+            continue;
+          }
         }
         // Contractor portfolio nav lists — multiple project names with dates concatenated
         if (/\d{4}\s+[\w\s']+\s+\d{4}\s+[\w\s']+\d{4}/i.test(clo) || /\w+\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}/i.test(clo)) {

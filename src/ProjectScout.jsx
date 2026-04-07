@@ -5211,14 +5211,47 @@ const PIF_FORM_URL = 'https://form.asana.com/?k=IUr_D0wx9ZOZGXfSY9okag&d=8691588
    MAIN APPLICATION — Centralized State & Lead Workflow
    ═══════════════════════════════════════════════════════════════ */
 
+// v4-b22: Simplified 5-tab Missoula-first product surface
 const TABS = [
-  { id: 'active', label: 'Board', icon: <Activity size={15} /> },
-  { id: 'asana', label: 'Asana \u2013 Pending / Go', icon: <Send size={15} /> },
-  { id: 'notpursued', label: 'Not Pursued / Asana No\u2011Go', icon: <Archive size={15} /> },
-  { id: 'registry', label: 'Source Registry', icon: <Database size={15} /> },
-  { id: 'taxonomy', label: 'Taxonomy', icon: <Layers size={15} /> },
-  { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
+  { id: 'news', label: 'News', icon: <Radio size={15} /> },
+  { id: 'rfp', label: 'RFP / RFQ', icon: <FileText size={15} /> },
+  { id: 'projects', label: 'Potential Projects', icon: <Target size={15} /> },
+  { id: 'asana', label: 'Asana Leads / Go', icon: <Send size={15} /> },
+  { id: 'notpursued', label: 'Asana No Go', icon: <Archive size={15} /> },
 ];
+
+// Lead classification for new tab structure
+function getLeadTab(lead) {
+  // Active solicitations → RFP/RFQ
+  if (lead.leadClass === 'active_solicitation' || lead.status === 'active') return 'rfp';
+  // Public notice procurement → RFP/RFQ
+  if (lead.leadOrigin === 'public_notice' && lead.dashboard_lane === 'active_leads') return 'rfp';
+  // News lane → News
+  if (lead.dashboard_lane === 'news') return 'news';
+  // News-style media sources → News
+  if (/news|media|contractor.*portfolio/i.test(lead.sourceName || '')) {
+    if (lead.watchCategory !== 'tif_district' && lead.watchCategory !== 'redevelopment_area') return 'news';
+  }
+  // Everything else → Potential Projects (districts, budget, named projects, watch items)
+  return 'projects';
+}
+
+// v4-b23: Missoula-only filter — suppress non-Missoula leads from user-facing tabs
+function isMissoulaLead(lead) {
+  const loc = (lead.location || '').toLowerCase();
+  // Explicitly Missoula
+  if (/missoula/i.test(loc)) return true;
+  // No location or generic "Montana" — check source
+  if (!loc || loc === 'montana' || loc === 'mt') {
+    const src = (lead.sourceName || lead.sourceId || '').toLowerCase();
+    return /missoula|mt-mis-|mt-mco-|mt-mra-|mt-mep-|mt-mcps-|mt-housing-|mt-library-|mt-public-|mt-engage-|mt-devapp-|mt-tedd-|mt-mda-|mt-landuse-|mt-notice-|mt-downtown-|mt-mcvoice-|mt-cityplan-|mt-planboard-/i.test(src);
+  }
+  // Known non-Missoula locations
+  if (/billings|bozeman|helena|great falls|kalispell|butte|spokane|boise|idaho|seattle|washington/i.test(loc)) return false;
+  // Unknown — allow through if source is Missoula-scoped
+  const src = (lead.sourceName || lead.sourceId || '').toLowerCase();
+  return /missoula/i.test(src);
+}
 
 /**
  * Board quality re-evaluation — prunes weak/noisy existing leads.
@@ -6666,8 +6699,11 @@ export default function ProjectScout() {
     localStorage.setItem('ps_tracked_reconcile_version', RECONCILE_VERSION);
   }, []); // Run once on mount only
 
-  const [activeTab, setActiveTab] = useState('active');
+  const [activeTab, setActiveTab] = useState('rfp');
   const [selectedLead, setSelectedLead] = useState(null);
+  // Admin panel toggle (Source Registry, Taxonomy, Settings)
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [adminTab, setAdminTab] = useState('settings');
   // v4-b12: Batch triage mode
   const [batchMode, setBatchMode] = useState(false);
   const [batchSelected, setBatchSelected] = useState(new Set());
@@ -8013,8 +8049,11 @@ export default function ProjectScout() {
   const handleCloseLead = useCallback(() => { setSelectedLead(null); }, []);
 
   // ─── Computed counts ───────────────────────────────────────
+  // v4-b22: Tab counts for new 5-tab structure
   const activeCounts = useMemo(() => ({
-    active: leads.length,
+    news: leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l)).length,
+    rfp: leads.filter(l => getLeadTab(l) === 'rfp' && isMissoulaLead(l)).length,
+    projects: leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l)).length,
     asana: submittedLeads.length,
     notpursued: notPursuedLeads.length,
   }), [leads, submittedLeads, notPursuedLeads]);
@@ -8054,7 +8093,7 @@ export default function ProjectScout() {
             </div>
             <div style={{ lineHeight: 1 }}>
               <div style={{ fontSize: 15.5, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.04em' }}>Project Scout</div>
-              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500, marginTop: 1, letterSpacing: '0.02em' }}>A&E + SMA Design</div>
+              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500, marginTop: 1, letterSpacing: '0.02em' }}>Missoula County Intelligence</div>
             </div>
           </div>
 
@@ -8092,6 +8131,10 @@ export default function ProjectScout() {
             <button onClick={() => setShowAddLead(true)} style={{ padding: '6px 14px', borderRadius: 7, border: 'none', background: '#0f172a', color: '#fff', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
               <Plus size={13} /> Add Lead
             </button>
+            <button onClick={() => setShowAdmin(!showAdmin)} title="Admin: Sources, Taxonomy, Settings"
+              style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0', background: showAdmin ? '#f1f5f9' : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#64748b' }}>
+              <SettingsIcon size={15} />
+            </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#94a3b8' }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
               <span>System Ready</span>
@@ -8108,85 +8151,198 @@ export default function ProjectScout() {
 
       {/* ─── MAIN CONTENT ─── */}
       <main style={{ maxWidth: 1320, margin: '0 auto', padding: '28px 28px 80px' }}>
+        {/* v4-b22: Admin panel (Sources, Taxonomy, Settings) — shown when gear icon is clicked */}
+        {showAdmin && (
+          <div style={{ marginBottom: 24, padding: '16px 20px', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>Admin</span>
+              {['settings', 'registry', 'taxonomy'].map(t => (
+                <button key={t} onClick={() => setAdminTab(t)} style={{
+                  padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  background: adminTab === t ? '#0f172a' : '#fff', color: adminTab === t ? '#fff' : '#64748b',
+                  border: `1px solid ${adminTab === t ? '#0f172a' : '#e2e8f0'}`,
+                }}>{t === 'settings' ? 'Settings' : t === 'registry' ? 'Sources' : 'Taxonomy'}</button>
+              ))}
+              <button onClick={() => setShowAdmin(false)} style={{ marginLeft: 'auto', padding: '2px 8px', borderRadius: 4, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: 11, color: '#94a3b8' }}>Close</button>
+            </div>
+            {adminTab === 'settings' && <SettingsTab onMergeResults={mergeEngineResults} onRunAsanaCheck={runAsanaCheck} onApplyValidation={(result) => {
+              if (result && result.keptLeads) {
+                setLeads(result.keptLeads);
+                if (result.suppressedLeads?.length > 0) {
+                  setNotPursuedLeads(prev => [...result.suppressedLeads.map(l => ({...l, status:'not_pursued', reasonNotPursued:'Validation: stale or claimed', dateNotPursued:new Date().toISOString()})), ...prev]);
+                }
+              }
+            }} allLeads={leads} notPursuedLeads={notPursuedLeads} submittedLeads={submittedLeads} />}
+            {adminTab === 'registry' && <SourceRegistryView />}
+            {adminTab === 'taxonomy' && <TaxonomyView />}
+          </div>
+        )}
+
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.04em', lineHeight: 1.2 }}>
-            {TABS.find(t => t.id === activeTab)?.label}
+            {TABS.find(t => t.id === activeTab)?.label || 'Project Scout'}
           </h1>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>
-            {activeTab === 'active' && (() => {
-              const ac = leads.filter(l => getOperationalStatus(l).primary === LEAD_STATUS.ACTIVE).length;
-              const wc = leads.filter(l => getOperationalStatus(l).primary === LEAD_STATUS.WATCH).length;
-              return `${ac} active pursuit${ac !== 1 ? 's' : ''}, ${wc} watch item${wc !== 1 ? 's' : ''} across active geography`;
-            })()}
-            {activeTab === 'asana' && (() => {
-              const noGoCount = submittedLeads.filter(l => getDisposition(l).type === 'no_go').length;
-              const pendingGoCount = submittedLeads.length - noGoCount;
-              return `${pendingGoCount} pending/go pursuit${pendingGoCount !== 1 ? 's' : ''} tracked in Asana`;
-            })()}
-            {activeTab === 'notpursued' && (() => {
-              const noGoCount = submittedLeads.filter(l => getDisposition(l).type === 'no_go').length;
-              return `${notPursuedLeads.length} not pursued, ${noGoCount} Asana no-go`;
-            })()}
-            {activeTab === 'registry' && 'Source intelligence — sources, entities, geography, families'}
-            {activeTab === 'taxonomy' && 'Editable classification registry — service fit, pursuit signals, markets, noise suppression'}
-            {activeTab === 'settings' && 'Intelligence engine, AI provider, scheduling, Asana integration'}
+            {activeTab === 'news' && 'Missoula County development news, project updates, and market signals'}
+            {activeTab === 'rfp' && 'Active solicitations and procurement opportunities in Missoula County'}
+            {activeTab === 'projects' && 'Strategic districts, future projects, and development opportunities'}
+            {activeTab === 'asana' && `${submittedLeads.length} pursuit${submittedLeads.length !== 1 ? 's' : ''} tracked in Asana`}
+            {activeTab === 'notpursued' && `${notPursuedLeads.length} leads not pursued — historical intelligence`}
           </p>
-          {/* ─── PRUNE REVIEW BANNER ─── */}
-          {activeTab === 'active' && pruningReviewQueue.length > 0 && (
-            <div onClick={() => setPruneReviewVisible(true)} style={{
-              marginTop: 12, padding: '10px 16px', borderRadius: 10,
-              background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
-              border: '1px solid #fde68a', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 10,
-              transition: 'box-shadow 0.15s',
-            }}
-              onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(245,158,11,0.2)'}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
-            >
-              <div style={{ width: 28, height: 28, borderRadius: 8, background: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 800, color: '#fff' }}>{pruningReviewQueue.length}</span>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#92400e' }}>
-                  {pruningReviewQueue.length === 1 ? '1 lead needs pruning review' : `${pruningReviewQueue.length} leads need pruning review`}
-                </div>
-                <div style={{ fontSize: 11, color: '#b45309', marginTop: 1 }}>
-                  Scout flagged borderline items — click to review before they are removed
-                </div>
-              </div>
-              <ArrowUpRight size={16} style={{ color: '#d97706', flexShrink: 0 }} />
-            </div>
-          )}
         </div>
 
-        {activeTab === 'active' && <ActiveLeadsTab leads={leads} onSelectLead={handleSelectLead} onUpdateLead={updateLead} batchMode={batchMode} batchSelected={batchSelected} toggleBatchSelect={toggleBatchSelect} setBatchMode={setBatchMode} setBatchSelected={setBatchSelected} />}
+        {/* v4-b22: News tab — compact news items */}
+        {activeTab === 'news' && (() => {
+          const newsLeads = leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l));
+          return newsLeads.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {newsLeads.map(lead => (
+                <div key={lead.id} onClick={() => handleSelectLead(lead)} style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#fff',
+                  borderRadius: 10, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s',
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.boxShadow = 'none'; }}
+                >
+                  <Radio size={13} style={{ color: '#3b82f6', flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{cleanHtmlEntities(lead.title)}</div>
+                    {lead.description && <p style={{ fontSize: 11.5, color: '#64748b', margin: '3px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanDescriptionForCard(cleanHtmlEntities(lead.description)).slice(0, 120)}</p>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.sourceName}</span>}
+                    <ScoreRing score={lead.relevanceScore || 0} size={30} strokeWidth={2.5} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+              <Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
+              <p style={{ fontSize: 14, fontWeight: 600 }}>No news items yet</p>
+              <p style={{ fontSize: 12 }}>Run a scan to populate Missoula County news and development signals</p>
+            </div>
+          );
+        })()}
+
+        {/* v4-b22: RFP / RFQ tab — clean active solicitations */}
+        {activeTab === 'rfp' && (() => {
+          const rfpLeads = leads.filter(l => getLeadTab(l) === 'rfp' && isMissoulaLead(l));
+          return rfpLeads.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 14 }}>
+              {rfpLeads.map(lead => (
+                <LeadCard key={lead.id} lead={lead} onClick={() => handleSelectLead(lead)}
+                  batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+              <FileText size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
+              <p style={{ fontSize: 14, fontWeight: 600 }}>No active solicitations</p>
+              <p style={{ fontSize: 12 }}>Run a scan to find active RFPs, RFQs, and bid opportunities in Missoula County</p>
+            </div>
+          );
+        })()}
+
+        {/* v4-b22: Potential Projects tab — districts, named projects, budget signals */}
+        {activeTab === 'projects' && (() => {
+          const projectLeads = leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l));
+          // Sub-classify
+          const districts = projectLeads.filter(l =>
+            l.watchCategory === 'tif_district' || l.watchCategory === 'redevelopment_area' ||
+            l.leadClass === 'strategic_watch' ||
+            /\b(urd|tedd|urban\s+renewal|district)\b/i.test(l.title || '')
+          );
+          const budget = projectLeads.filter(l =>
+            !districts.includes(l) && (/^budget\s/i.test(l.title || '') || l.watchCategory === 'capital_budget')
+          );
+          const named = projectLeads.filter(l => !districts.includes(l) && !budget.includes(l));
+
+          return (
+            <div>
+              {/* Strategic Districts */}
+              {districts.length > 0 && (
+                <div style={{ marginBottom: 28 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <Target size={14} style={{ color: '#7c3aed' }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Strategic Districts</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: '#ede9fe', color: '#7c3aed' }}>{districts.length}</span>
+                    <div style={{ flex: 1, height: 1, background: '#e9d5ff' }} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
+                    {districts.map(lead => (
+                      <LeadCard key={lead.id} lead={lead} onClick={() => handleSelectLead(lead)}
+                        batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
+                        style={{ borderLeft: '3px solid #7c3aed' }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Named Projects */}
+              {named.length > 0 && (
+                <div style={{ marginBottom: 28 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <MapPin size={14} style={{ color: '#1d4ed8' }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Named Projects</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: '#dbeafe', color: '#1d4ed8' }}>{named.length}</span>
+                    <div style={{ flex: 1, height: 1, background: '#93c5fd' }} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+                    {named.map(lead => (
+                      <LeadCard key={lead.id} lead={lead} onClick={() => handleSelectLead(lead)}
+                        batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Budget / CIP Signals */}
+              {budget.length > 0 && (
+                <div style={{ marginBottom: 28 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <DollarSign size={14} style={{ color: '#b45309' }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Budget / CIP Signals</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: '#fef3c7', color: '#b45309' }}>{budget.length}</span>
+                    <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {budget.map(lead => (
+                      <div key={lead.id} onClick={() => handleSelectLead(lead)} style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#fff',
+                        borderRadius: 8, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s',
+                      }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = '#fde68a'; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; }}
+                      >
+                        <DollarSign size={12} style={{ color: '#b45309', flexShrink: 0 }} />
+                        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanHtmlEntities(lead.title)}</span>
+                        {lead.potentialBudget && <span style={{ fontSize: 11, fontWeight: 600, color: '#b45309', flexShrink: 0 }}>{lead.potentialBudget}</span>}
+                        <ScoreRing score={lead.relevanceScore || 0} size={28} strokeWidth={2.5} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {projectLeads.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+                  <Target size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
+                  <p style={{ fontSize: 14, fontWeight: 600 }}>No potential projects yet</p>
+                  <p style={{ fontSize: 12 }}>Run a scan to find strategic districts, development opportunities, and future projects</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Asana tabs — preserved from existing components */}
         {activeTab === 'asana' && <SubmittedTab leads={submittedLeads} onSelectLead={handleSelectLead} onImport={() => setShowAsanaImport(true)} />}
         {activeTab === 'notpursued' && <NotPursuedTab leads={notPursuedLeads} submittedLeads={submittedLeads} onSelectLead={handleSelectLead} onRestore={restoreFromNotPursued} />}
-        {activeTab === 'registry' && <SourceRegistryView />}
-        {activeTab === 'taxonomy' && <TaxonomyView />}
-        {activeTab === 'settings' && <SettingsTab onMergeResults={mergeEngineResults} onRunAsanaCheck={runAsanaCheck} onApplyValidation={(result) => {
-          // result can be: { keptLeads: [...], suppressedLeads: [...], validationReviewQueue: [...] } or plain array (legacy)
-          if (result && result.keptLeads) {
-            setLeads(result.keptLeads);
-            localStorage.setItem('ps_leads', JSON.stringify(result.keptLeads));
-            if (result.suppressedLeads && result.suppressedLeads.length > 0) {
-              setNotPursuedLeads(prev => [...result.suppressedLeads, ...prev]);
-            }
-            // v30: Route validation-flagged borderline leads to pruning review
-            if (result.validationReviewQueue && result.validationReviewQueue.length > 0) {
-              setPruningReviewQueue(prev => {
-                const existingIds = new Set(prev.map(r => r.lead.id));
-                const newItems = result.validationReviewQueue.filter(r => !existingIds.has(r.lead.id));
-                return [...prev, ...newItems];
-              });
-              setPruneReviewVisible(true);
-            }
-          } else {
-            // Legacy: plain array of all leads
-            setLeads(result);
-            localStorage.setItem('ps_leads', JSON.stringify(result));
-          }
-        }} allLeads={leads} notPursuedLeads={notPursuedLeads} submittedLeads={submittedLeads} />}
+        {/* Admin tabs moved to collapsible admin panel above */}
       </main>
 
       {/* v4-b12: Batch triage floating action bar */}
