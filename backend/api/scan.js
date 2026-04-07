@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.19-20260330-missoulaonly-b23';
+const SCAN_BUILD_ID = 'scan-v4.20-20260330-gmailintake-b24';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -112,6 +112,17 @@ const SOURCE_PROFILES = {
     blocked_object_types: [],
     dashboard_lane: 'active_leads',
     ignore_patterns: ['notice to creditors', 'estate notice', 'foreclosure', 'trustee sale', 'abandoned vehicle', 'name change', 'summons'],
+  },
+  // v4-b24: Gmail intake — reads labeled emails from a dedicated Gmail account
+  gmail_intake: {
+    container_behavior: 'api',
+    max_child_fetches: 0,
+    max_leads: 15,
+    prefer_child_types: [],
+    allowed_object_types: ['solicitation', 'project', 'development_potential', 'news_item'],
+    blocked_object_types: [],
+    dashboard_lane: 'news', // default — overridden by label classification
+    ignore_patterns: [],
   },
 };
 
@@ -343,6 +354,226 @@ function extractLeadFromNotice(notice, src) {
       signalDate: notice.publishedDate || now,
       dateFound: now,
       signalStrength: isProcurement ? 'strong' : 'medium',
+      keywords: [],
+    }],
+  };
+}
+
+// ── v4-b24: Gmail intake via Gmail API ───────────────────────
+// Reads labeled emails from a dedicated Gmail account.
+// Requires GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN env vars.
+// Labels: Scout/News → news, Scout/RFP → active_leads, Scout/Projects → development_potentials
+
+const GMAIL_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
+
+async function getGmailAccessToken() {
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
+  if (!clientId || !clientSecret || !refreshToken) return null;
+
+  try {
+    const resp = await fetch(GMAIL_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.access_token || null;
+  } catch { return null; }
+}
+
+async function fetchGmailMessages(src, log = () => {}) {
+  const token = await getGmailAccessToken();
+  if (!token) {
+    log('  ⚠ Gmail not configured — skipping (set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN)');
+    return { ok: false, err: 'Gmail credentials not configured', messages: [], unconfigured: true };
+  }
+
+  const profile = src.source_profile || {};
+  const maxResults = profile.max_messages || 20;
+  // Query: labeled with any Scout/* label, unread preferred, last 7 days
+  const query = profile.gmail_query || 'label:Scout newer_than:7d';
+
+  try {
+    // List message IDs matching query
+    const listUrl = `${GMAIL_API_BASE}/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
+    const listResp = await fetch(listUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!listResp.ok) {
+      log(`  ✗ Gmail API list error: HTTP ${listResp.status}`);
+      return { ok: false, err: `HTTP ${listResp.status}`, messages: [] };
+    }
+    const listData = await listResp.json();
+    const messageIds = (listData.messages || []).map(m => m.id);
+
+    if (messageIds.length === 0) {
+      log('  ✓ Gmail: 0 messages matching query');
+      return { ok: true, messages: [], totalResults: 0 };
+    }
+
+    // Fetch each message's metadata + snippet
+    const messages = [];
+    for (const msgId of messageIds.slice(0, maxResults)) {
+      try {
+        const msgUrl = `${GMAIL_API_BASE}/messages/${msgId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`;
+        const msgResp = await fetch(msgUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!msgResp.ok) continue;
+        const msg = await msgResp.json();
+
+        const headers = msg.payload?.headers || [];
+        const getHeader = (name) => headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+        const labelIds = msg.labelIds || [];
+
+        // Determine Scout label
+        let scoutLabel = 'news'; // default
+        const labelNames = labelIds.map(l => l.toLowerCase());
+        if (labelNames.some(l => l.includes('scout') && l.includes('rfp'))) scoutLabel = 'rfp';
+        else if (labelNames.some(l => l.includes('scout') && l.includes('project'))) scoutLabel = 'projects';
+        else if (labelNames.some(l => l.includes('scout') && l.includes('news'))) scoutLabel = 'news';
+
+        // Extract links from snippet (basic URL extraction)
+        const snippet = msg.snippet || '';
+        const links = (snippet.match(/https?:\/\/[^\s<>"']+/g) || []).slice(0, 5);
+
+        messages.push({
+          id: msg.id,
+          threadId: msg.threadId,
+          subject: getHeader('Subject'),
+          from: getHeader('From'),
+          date: getHeader('Date'),
+          snippet,
+          links,
+          scoutLabel,
+          labelIds,
+          internalDate: msg.internalDate,
+        });
+      } catch { /* skip individual message errors */ }
+    }
+
+    log(`  ✓ Gmail: ${messages.length} messages fetched (${listData.resultSizeEstimate || '?'} total)`);
+    return { ok: true, messages, totalResults: listData.resultSizeEstimate || messages.length };
+  } catch (err) {
+    log(`  ✗ Gmail API error: ${err.message}`);
+    return { ok: false, err: err.message, messages: [] };
+  }
+}
+
+function extractLeadFromEmail(email, src) {
+  const subject = (email.subject || '').trim();
+  if (!subject || subject.length < 5) return null;
+
+  let title = cleanTitle(subject);
+  if (!title || title.length < 8) return null;
+  const vlt = validateLiveTitle(title);
+  if (!vlt.pass) return null;
+  if (isNavigationJunk(title)) return null;
+
+  // Classification based on Gmail label
+  const isRFP = email.scoutLabel === 'rfp' ||
+    /\b(rfq|rfp|invitation\s+to\s+bid|request\s+for\s+(qualifications?|proposals?)|solicitation|bid\s+opportunity)\b/i.test(subject);
+  const isProject = email.scoutLabel === 'projects' ||
+    /\b(tedd|urd|urban\s+renewal|redevelopment|development\s+(project|plan|update)|capital\s+improvement|bond|master\s+plan)\b/i.test(subject);
+
+  const dashboardLane = isRFP ? 'active_leads' : isProject ? 'development_potentials' : 'news';
+  const leadClass = isRFP ? 'active_solicitation' : 'watch_signal';
+  const status = isRFP ? 'active' : 'watch';
+
+  // Extract due date from subject/snippet
+  const combinedText = `${subject} ${email.snippet || ''}`;
+  const dueDateMatch = combinedText.match(/(?:due|deadline|submit|received)\s+(?:by|before|no later than|until)\s+([A-Z][a-z]+\.?\s+\d{1,2},?\s*\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  const actionDueDate = dueDateMatch ? dueDateMatch[1] : '';
+
+  // Extract sender name
+  const fromName = (email.from || '').replace(/<[^>]+>/, '').trim() || email.from || 'Email';
+
+  // Infer market from text
+  const lo = combinedText.toLowerCase();
+  let marketSector = 'Other';
+  if (/\b(school|elementary|k-12)\b/.test(lo)) marketSector = 'K-12';
+  else if (/\b(university|college|campus)\b/.test(lo)) marketSector = 'Higher Education';
+  else if (/\b(hospital|clinic|medical)\b/.test(lo)) marketSector = 'Healthcare';
+  else if (/\b(fire station|police|public safety)\b/.test(lo)) marketSector = 'Public Safety';
+  else if (/\b(courthouse|city hall|civic|municipal)\b/.test(lo)) marketSector = 'Civic';
+  else if (/\b(tedd|urd|redevelopment|mixed.?use|development\s+district)\b/.test(lo)) marketSector = 'Mixed Use';
+  else if (/\b(housing|affordable|residential|apartment)\b/.test(lo)) marketSector = 'Housing';
+  else if (/\b(construction|renovation|building|facility|project)\b/.test(lo)) marketSector = 'Civic';
+
+  const emailDate = email.internalDate
+    ? new Date(parseInt(email.internalDate)).toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0];
+
+  const id = `lead-gmail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const now = new Date().toISOString();
+  const description = email.snippet ? `${email.snippet.slice(0, 350)}` : subject;
+
+  return {
+    id,
+    title,
+    owner: fromName,
+    projectName: title,
+    location: 'Missoula, MT',
+    county: 'Missoula',
+    marketSector,
+    projectType: isRFP ? 'RFQ/RFP' : 'Other',
+    description: `${description} — Source: Email (${fromName})`,
+    whyItMatters: isRFP
+      ? `Procurement notice received via email from ${fromName}. Review scope and deadline.`
+      : `Development update received via email from ${fromName}. Monitor for project opportunities.`,
+    aiReasonForAddition: `Email intake (${email.scoutLabel}) from ${fromName}, received ${emailDate}.`,
+    potentialTimeline: '',
+    potentialBudget: '',
+    action_due_date: actionDueDate,
+    relevanceScore: isRFP ? 60 : 35,
+    pursuitScore: isRFP ? 40 : 15,
+    sourceConfidenceScore: 65,
+    confidenceNotes: `Email from ${fromName}. Label: Scout/${email.scoutLabel}. Received ${emailDate}.`,
+    dateDiscovered: now,
+    originalSignalDate: emailDate,
+    lastCheckedDate: now,
+    status,
+    leadClass,
+    leadOrigin: 'gmail_intake',
+    dashboard_lane: dashboardLane,
+    watchCategory: isRFP ? 'named_project' : isProject ? 'development_program' : 'named_project',
+    projectStatus: isRFP ? 'active_solicitation' : 'future_watch',
+    extractionPath: 'gmail_api',
+    gmailMessageId: email.id,
+    emailFrom: email.from,
+    emailDate,
+    sourceName: src.name || src.source_name || 'Gmail Intake',
+    sourceUrl: '',
+    sourceId: src.id || src.source_id || '',
+    evidenceLinks: email.links?.slice(0, 3) || [],
+    evidenceSourceLinks: [{ url: '', label: `Email from ${fromName}`, linkType: 'email' }],
+    evidenceSummary: `Email intake (${email.scoutLabel}): ${title}. From ${fromName}, received ${emailDate}. ${description.slice(0, 200)}`,
+    matchedFocusPoints: [],
+    matchedKeywords: [],
+    matchedTargetOrgs: [],
+    taxonomyMatches: [],
+    internalContact: '',
+    notes: '',
+    evidence: [{
+      id: `ev-${id}`,
+      leadId: id,
+      sourceId: src.id || src.source_id || '',
+      sourceName: fromName,
+      url: email.links?.[0] || '',
+      title: `Email: ${title}`,
+      summary: `${email.scoutLabel} email from ${fromName}, ${emailDate}. ${description.slice(0, 200)}`,
+      signalDate: emailDate,
+      dateFound: now,
+      signalStrength: isRFP ? 'strong' : 'medium',
       keywords: [],
     }],
   };
@@ -4975,6 +5206,46 @@ export default async function handler(req, res) {
             log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}" | type=${notice.noticeType} | lane=${lead.dashboard_lane} | pub=${notice.publishedDate}`);
           }
           log(`  → ${noticeAdded} notice lead(s) added (${noticeResult.notices.length} notices fetched)`);
+        } else {
+          fetchFail++;
+        }
+        continue;
+      }
+
+      // v4-b24: Gmail intake sources use Gmail API
+      if (earlyProfile.profile_type === 'gmail_intake') {
+        const gmailResult = await fetchGmailMessages(src, log);
+        if (gmailResult.unconfigured) {
+          sourceHealthMap.push({ sourceId: src.id, status: 'unconfigured', error: 'Gmail credentials not configured' });
+          continue; // graceful skip — no error, no failure count
+        }
+        sourceHealthMap.push({ sourceId: src.id, status: gmailResult.ok ? 'healthy' : 'failing', error: gmailResult.err || null });
+        if (gmailResult.ok) {
+          fetchOk++;
+          if (gmailResult.messages.length > 0) parseHits++;
+          let gmailAdded = 0;
+          for (const email of gmailResult.messages) {
+            const lead = extractLeadFromEmail(email, src);
+            if (!lead) continue;
+            // Dedup by Gmail message ID
+            const gmailDupe = added.some(a => a.gmailMessageId === email.id) ||
+              (existingLeads || []).some(ex => ex.gmailMessageId === email.id);
+            if (gmailDupe) { skipDupe++; continue; }
+            // Dedup by title
+            const tl = lead.title.toLowerCase().trim();
+            if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
+            const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
+            if (isDupe) { skipDupe++; continue; }
+            // Title quality gates
+            if (isGenericNewsHeadline(lead.title)) { skipGenericTitle++; continue; }
+            if (isRetrospectiveTitle(lead.title)) { skipNotProjectSpecific++; continue; }
+            exSet.add(tl);
+            addedTitles.push(lead.title);
+            added.push(lead);
+            gmailAdded++;
+            log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}" | label=${email.scoutLabel} | lane=${lead.dashboard_lane} | from=${(email.from||'').slice(0,30)}`);
+          }
+          log(`  → ${gmailAdded} email lead(s) added (${gmailResult.messages.length} messages fetched)`);
         } else {
           fetchFail++;
         }

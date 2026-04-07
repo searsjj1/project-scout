@@ -2,7 +2,7 @@
  * Project Scout — Phase 1 Seed Data (canonical)
  * Source: ProjectScout_Sources_Primer.xlsx + Master Brief 3.0
  */
-export const SEED_VERSION = '2026-03-30-v4-b20-teddcoverage';
+export const SEED_VERSION = '2026-03-30-v4-b24-gmailintake';
 
 // V4-b14: Critical Missoula sources — these are highest-priority sources that should be
 // monitored carefully for health. Broken critical sources need immediate repair.
@@ -425,6 +425,14 @@ export const SEED_SOURCES = [
    * Ingestion: Via dedicated public_notice profile — bypasses fetchUrl(), calls API directly.
    * ────────────────────────────────────────────────────────────────────────── */
   { ...D, source_id:'MT-NOTICE-001', entity_id:'ENT-MT-FREEPRESS', source_family:'SF-14', priority_tier:'Tier 1', source_name:'Missoulian Public Notices — Bid & Procurement', source_url:'https://missoulian.column.us/search', base_url:'https://missoulian.column.us', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Newspaper public notices', owner_type:'other', keywords_to_watch:['invitation to bid','rfp','rfq','construction','design','architect','engineer','renovation','facility','building','project'], board_or_department:null, check_frequency:'Weekly', notes:'Missoulian newspaper public notices via Column.us API. Fetches Invitation to Bid notices for Missoula County. Complements direct county bids (MT-MCO-008) with legally-required newspaper filings that may appear before or instead of owner-side postings.', date_added:'2026-03-29', source_profile:{ profile_type:'public_notice', dashboard_lane:'active_leads', newspaper_name:'Missoulian', notice_types:['Invitation to Bid'], days_back:30, max_notices:20 } },
+
+  /* ── v4-b24: Gmail Intake — dedicated email intelligence source ──────────────
+   * Reads labeled emails from a dedicated Gmail account via Gmail API.
+   * Requires: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN env vars.
+   * Gmail labels: Scout/News → News, Scout/RFP → RFP/RFQ, Scout/Projects → Potential Projects
+   * Gracefully skips when credentials are not configured.
+   * ────────────────────────────────────────────────────────────────────────── */
+  { ...D, source_id:'MT-GMAIL-001', entity_id:'ENT-MISSOULA-CITY', source_family:'SF-16', priority_tier:'Tier 1', source_name:'Gmail Intake — Missoula County', source_url:'', base_url:'', state:'MT', county:'Missoula', city:'Missoula', coverage_regions:['ALL_MT','WESTERN_MT'], source_type:'Email intake', owner_type:'other', keywords_to_watch:['rfq','rfp','bid','construction','design','renovation','project','facility','building','development','capital','bond'], board_or_department:null, check_frequency:'Daily', notes:'Dedicated Gmail account for Missoula County intelligence intake. Reads emails labeled Scout/News, Scout/RFP, Scout/Projects via Gmail API. Requires OAuth2 credentials configured as Vercel env vars. Gracefully skips when unconfigured.', date_added:'2026-03-30', source_profile:{ profile_type:'gmail_intake', dashboard_lane:'news', gmail_query:'label:Scout newer_than:7d', max_messages:20 } },
 
   /* ── BATCH v4-b17: Critical Source Alignment — Phase 1A (2026-03-30) ──────────
    * 5 highest-priority sources from the critical-source model:
