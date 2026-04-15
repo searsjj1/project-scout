@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.22-20260415-gmail-e2e-ingestion-b25';
+const SCAN_BUILD_ID = 'scan-v4.23-20260415-news-highlights-b26';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
