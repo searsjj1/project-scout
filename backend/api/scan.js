@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.21-20260415-gmail-proof-source-reset-b25';
+const SCAN_BUILD_ID = 'scan-v4.22-20260415-gmail-e2e-ingestion-b25';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -359,35 +359,171 @@ function extractLeadFromNotice(notice, src) {
   };
 }
 
-// ── v4-b24: Gmail intake via Gmail API ───────────────────────
+// ── v4-b25: Gmail intake via Gmail API — full-body + link-following + attachments ──
 // Reads labeled emails from a dedicated Gmail account.
 // Requires GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN env vars.
-// Labels: Scout/News → news, Scout/RFP → active_leads, Scout/Projects → development_potentials
+// Labels: Work/Scout/News → news, Work/Scout/RFP → active_leads, Work/Scout/Projects → development_potentials
+// Now reads full message body (text/plain + text/html), follows linked URLs (HTML + PDF),
+// and detects/parses PDF attachments.
 
 const GMAIL_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const GMAIL_MAX_LINK_FOLLOWS = 3;       // Max links to fetch per email
+const GMAIL_LINK_FETCH_TIMEOUT = 12000; // 12s per linked URL
 
 async function getGmailAccessToken() {
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
   const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
   if (!clientId || !clientSecret || !refreshToken) return null;
-
   try {
     const resp = await fetch(GMAIL_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      }),
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
     });
     if (!resp.ok) return null;
     const data = await resp.json();
     return data.access_token || null;
   } catch { return null; }
+}
+
+// Decode base64url (Gmail's encoding for message body parts)
+function decodeBase64Url(str) {
+  if (!str) return '';
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
+  try { return Buffer.from(padded, 'base64').toString('utf-8'); } catch { return ''; }
+}
+
+// Recursively extract body text and attachments from a MIME payload
+function parseMimeParts(payload, result = { textPlain: '', textHtml: '', attachments: [] }) {
+  if (!payload) return result;
+  const mime = (payload.mimeType || '').toLowerCase();
+  const filename = payload.filename || '';
+
+  // Leaf part with body data
+  if (payload.body?.data) {
+    if (mime === 'text/plain' && !filename) {
+      result.textPlain += decodeBase64Url(payload.body.data);
+    } else if (mime === 'text/html' && !filename) {
+      result.textHtml += decodeBase64Url(payload.body.data);
+    }
+  }
+  // Attachment (has filename or attachmentId)
+  if (filename && payload.body?.attachmentId) {
+    result.attachments.push({
+      filename,
+      mimeType: mime,
+      attachmentId: payload.body.attachmentId,
+      size: payload.body.size || 0,
+    });
+  }
+  // Recurse into multipart children
+  if (payload.parts) {
+    for (const part of payload.parts) parseMimeParts(part, result);
+  }
+  return result;
+}
+
+// Strip HTML to text (simplified — for extracting readable content from email HTML)
+function htmlToText(html) {
+  if (!html) return '';
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<\/h[1-6]>/gi, '\n\n')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ').replace(/&#?\w+;/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Extract all http/https links from HTML content (from href attributes + plain-text URLs)
+function extractLinksFromHtml(html) {
+  if (!html) return [];
+  const links = new Set();
+  // From href attributes
+  const hrefPat = /href=["'](https?:\/\/[^"'#]+)["']/gi;
+  for (const m of html.matchAll(hrefPat)) links.add(m[1].replace(/&amp;/g, '&'));
+  // From plain text (fallback for text/plain bodies)
+  const urlPat = /https?:\/\/[^\s<>"')\]]+/g;
+  for (const m of html.matchAll(urlPat)) links.add(m[0].replace(/[.,;:!?)]+$/, ''));
+  return [...links];
+}
+
+// Filter links to only those worth following (project docs, meeting minutes, PDFs, bid pages)
+function isFollowableGmailLink(url) {
+  if (!url) return false;
+  const lo = url.toLowerCase();
+  // Skip social, unsubscribe, tracking, login, generic web
+  if (/\b(unsubscribe|email-preferences|tracking|click\.|mailchimp|constantcontact|facebook|twitter|linkedin|instagram|youtube|google\.com\/(maps|search)|yelp|tripadvisor|mailto:|tel:)\b/.test(lo)) return false;
+  if (/\.(jpg|jpeg|png|gif|ico|svg|woff|css|js)(\?|$)/i.test(lo)) return false;
+  // Prioritize document-like links
+  if (/\.pdf(\?|$)/i.test(lo)) return true;
+  if (/\b(filestream|document|agenda|minutes|memo|attachment|report|bid|rfp|rfq|proposal|meeting|escribemeetings|legistar|granicus|civicplus|boarddocs)\b/i.test(lo)) return true;
+  if (/\b(missoula|missoulacounty|ci\.missoula|mra|engagemissoula|mcps|umt|mountainline)\b/i.test(lo)) return true;
+  // Government / institutional domains are generally worth following
+  if (/\.(gov|edu|org|us)[\/?]/i.test(lo)) return true;
+  return false;
+}
+
+// Build the Gmail query dynamically by fetching labels and finding Scout-related ones
+async function buildGmailQuery(token, days = 7, log = () => {}) {
+  try {
+    const labelsResp = await fetch(`${GMAIL_API_BASE}/labels`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!labelsResp.ok) {
+      log('  ⚠ Could not fetch Gmail labels — falling back to broad query');
+      return `newer_than:${days}d`;
+    }
+    const labelsData = await labelsResp.json();
+    const allLabels = labelsData.labels || [];
+
+    // Find labels containing "scout" (case-insensitive)
+    const scoutLabels = allLabels.filter(l => /scout/i.test(l.name));
+    if (scoutLabels.length === 0) {
+      log('  ⚠ No Scout labels found in Gmail — using broad query');
+      return `newer_than:${days}d`;
+    }
+
+    // Build query: convert label names to Gmail query format
+    // Gmail query uses label names with / replaced by - and lowercased
+    const labelQueries = scoutLabels.map(l => {
+      const queryName = l.name.toLowerCase().replace(/\//g, '-').replace(/\s+/g, '-');
+      return `label:${queryName}`;
+    });
+
+    const query = `(${labelQueries.join(' OR ')}) newer_than:${days}d`;
+    log(`  Gmail query (dynamic): ${query}`);
+    log(`  Scout labels: ${scoutLabels.map(l => l.name).join(', ')}`);
+    return query;
+  } catch (e) {
+    log(`  ⚠ Label fetch error: ${e.message} — falling back`);
+    return `newer_than:${days}d`;
+  }
+}
+
+// Classify an email's Scout label from the label IDs + fetched label name map
+function classifyScoutLabel(labelIds, labelNameMap) {
+  for (const lid of labelIds) {
+    const name = (labelNameMap[lid] || '').toLowerCase();
+    if (name.includes('scout') && name.includes('rfp')) return 'rfp';
+    if (name.includes('scout') && name.includes('project')) return 'projects';
+    if (name.includes('scout') && name.includes('news')) return 'news';
+  }
+  // Fallback: any Scout label defaults to news
+  for (const lid of labelIds) {
+    if (/scout/i.test(labelNameMap[lid] || '')) return 'news';
+  }
+  return 'news';
 }
 
 async function fetchGmailMessages(src, log = () => {}) {
@@ -399,15 +535,25 @@ async function fetchGmailMessages(src, log = () => {}) {
 
   const profile = src.source_profile || {};
   const maxResults = profile.max_messages || 20;
-  // Query: labeled with any Scout/* label, unread preferred, last 7 days
-  const query = profile.gmail_query || 'label:Scout newer_than:7d';
+  const days = profile.gmail_days || 7;
+
+  // Step 1: Build query dynamically from actual Gmail labels
+  const query = await buildGmailQuery(token, days, log);
+
+  // Build label-name map for classification
+  let labelNameMap = {};
+  try {
+    const lr = await fetch(`${GMAIL_API_BASE}/labels`, { headers: { Authorization: `Bearer ${token}` } });
+    if (lr.ok) {
+      const ld = await lr.json();
+      for (const l of (ld.labels || [])) labelNameMap[l.id] = l.name;
+    }
+  } catch {}
 
   try {
-    // List message IDs matching query
+    // Step 2: List matching message IDs
     const listUrl = `${GMAIL_API_BASE}/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
-    const listResp = await fetch(listUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const listResp = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
     if (!listResp.ok) {
       log(`  ✗ Gmail API list error: HTTP ${listResp.status}`);
       return { ok: false, err: `HTTP ${listResp.status}`, messages: [] };
@@ -416,52 +562,115 @@ async function fetchGmailMessages(src, log = () => {}) {
     const messageIds = (listData.messages || []).map(m => m.id);
 
     if (messageIds.length === 0) {
-      log('  ✓ Gmail: 0 messages matching query');
+      log(`  ✓ Gmail: 0 messages matching query "${query}"`);
       return { ok: true, messages: [], totalResults: 0 };
     }
+    log(`  Gmail: ${messageIds.length} message IDs found (query: "${query.slice(0, 80)}")`);
 
-    // Fetch each message's metadata + snippet
+    // Step 3: Fetch each message with format=full to get the entire body
     const messages = [];
     for (const msgId of messageIds.slice(0, maxResults)) {
       try {
-        const msgUrl = `${GMAIL_API_BASE}/messages/${msgId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`;
-        const msgResp = await fetch(msgUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!msgResp.ok) continue;
+        const msgUrl = `${GMAIL_API_BASE}/messages/${msgId}?format=full`;
+        const msgResp = await fetch(msgUrl, { headers: { Authorization: `Bearer ${token}` } });
+        if (!msgResp.ok) { log(`    ✗ Message ${msgId}: HTTP ${msgResp.status}`); continue; }
         const msg = await msgResp.json();
 
         const headers = msg.payload?.headers || [];
         const getHeader = (name) => headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
         const labelIds = msg.labelIds || [];
 
-        // Determine Scout label
-        let scoutLabel = 'news'; // default
-        const labelNames = labelIds.map(l => l.toLowerCase());
-        if (labelNames.some(l => l.includes('scout') && l.includes('rfp'))) scoutLabel = 'rfp';
-        else if (labelNames.some(l => l.includes('scout') && l.includes('project'))) scoutLabel = 'projects';
-        else if (labelNames.some(l => l.includes('scout') && l.includes('news'))) scoutLabel = 'news';
+        // Parse MIME structure → get text/plain, text/html, and attachments
+        const mime = parseMimeParts(msg.payload);
+        const bodyText = mime.textPlain || htmlToText(mime.textHtml) || msg.snippet || '';
+        const bodyHtml = mime.textHtml || '';
 
-        // Extract links from snippet (basic URL extraction)
-        const snippet = msg.snippet || '';
-        const links = (snippet.match(/https?:\/\/[^\s<>"']+/g) || []).slice(0, 5);
+        // Classify via label name map
+        const scoutLabel = classifyScoutLabel(labelIds, labelNameMap);
+
+        // Extract links from full body (HTML preferred, fall back to plain text)
+        const allLinks = bodyHtml
+          ? extractLinksFromHtml(bodyHtml)
+          : (bodyText.match(/https?:\/\/[^\s<>"')\]]+/g) || []).map(u => u.replace(/[.,;:!?)]+$/, ''));
+        const followableLinks = allLinks.filter(isFollowableGmailLink);
+
+        // Step 4: Follow linked URLs (HTML pages + PDFs)
+        const linkedContent = [];
+        for (const linkUrl of followableLinks.slice(0, GMAIL_MAX_LINK_FOLLOWS)) {
+          try {
+            const isPdf = /\.pdf(\?|$)/i.test(linkUrl) || /filestream|documentid/i.test(linkUrl);
+            if (isPdf) {
+              log(`    📄 Following PDF link: ${linkUrl.slice(0, 80)}...`);
+              const pdfResult = await fetchPdfContent(linkUrl);
+              if (pdfResult.ok) {
+                log(`      ✓ PDF: ${pdfResult.pageCount} pages, ${pdfResult.content.length} chars`);
+                linkedContent.push({ url: linkUrl, type: 'pdf', title: pdfResult.title, content: pdfResult.content.slice(0, 15000), pageCount: pdfResult.pageCount });
+              } else {
+                log(`      ✗ PDF: ${pdfResult.err}`);
+              }
+            } else {
+              log(`    🔗 Following HTML link: ${linkUrl.slice(0, 80)}...`);
+              const htmlResult = await fetchUrl(linkUrl, GMAIL_LINK_FETCH_TIMEOUT);
+              if (htmlResult.ok && htmlResult.content && htmlResult.content.length > 100) {
+                log(`      ✓ HTML: ${htmlResult.length} chars — "${(htmlResult.title||'').slice(0,50)}"`);
+                linkedContent.push({ url: linkUrl, type: 'html', title: htmlResult.title, content: htmlResult.content.slice(0, 15000) });
+              } else {
+                log(`      ✗ HTML: ${htmlResult.err || 'too short'}`);
+              }
+            }
+          } catch (e) { log(`      ✗ Link error: ${e.message}`); }
+        }
+
+        // Step 5: Fetch PDF attachments
+        const attachmentContent = [];
+        for (const att of mime.attachments) {
+          if (!/pdf/i.test(att.mimeType)) { log(`    📎 Skipping non-PDF attachment: ${att.filename} (${att.mimeType})`); continue; }
+          if (att.size > 5 * 1024 * 1024) { log(`    📎 Skipping large PDF: ${att.filename} (${Math.round(att.size/1024)}KB)`); continue; }
+          try {
+            log(`    📎 Fetching PDF attachment: ${att.filename}`);
+            const attUrl = `${GMAIL_API_BASE}/messages/${msgId}/attachments/${att.attachmentId}`;
+            const attResp = await fetch(attUrl, { headers: { Authorization: `Bearer ${token}` } });
+            if (!attResp.ok) { log(`      ✗ Attachment fetch: HTTP ${attResp.status}`); continue; }
+            const attData = await attResp.json();
+            const attBytes = Buffer.from((attData.data || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+
+            const unpdf = await getUnpdf();
+            if (!unpdf) { log('      ✗ unpdf not available'); continue; }
+            const pdf = await unpdf.getDocumentProxy(new Uint8Array(attBytes));
+            const { totalPages, text } = await unpdf.extractText(pdf, { mergePages: true });
+            const cleanText = (typeof text === 'string' ? text : '').replace(/\s+/g, ' ').trim();
+            if (cleanText.length > 200) {
+              log(`      ✓ PDF attachment: ${totalPages} pages, ${cleanText.length} chars`);
+              attachmentContent.push({ filename: att.filename, type: 'pdf', content: cleanText.slice(0, 15000), pageCount: totalPages });
+            } else {
+              log(`      ⚠ PDF attachment text too short (${cleanText.length} chars) — likely scanned`);
+            }
+          } catch (e) { log(`      ✗ Attachment parse error: ${e.message}`); }
+        }
+
+        const subject = getHeader('Subject');
+        log(`    ✉ "${subject.slice(0,70)}" [${scoutLabel}] body=${bodyText.length}ch links=${followableLinks.length} linked=${linkedContent.length} att=${attachmentContent.length}`);
 
         messages.push({
           id: msg.id,
           threadId: msg.threadId,
-          subject: getHeader('Subject'),
+          subject,
           from: getHeader('From'),
           date: getHeader('Date'),
-          snippet,
-          links,
+          snippet: msg.snippet || '',
+          bodyText: bodyText.slice(0, 20000),
+          bodyHtml,
+          links: followableLinks,
+          linkedContent,
+          attachmentContent,
           scoutLabel,
           labelIds,
           internalDate: msg.internalDate,
         });
-      } catch { /* skip individual message errors */ }
+      } catch (e) { log(`    ✗ Message error: ${e.message}`); }
     }
 
-    log(`  ✓ Gmail: ${messages.length} messages fetched (${listData.resultSizeEstimate || '?'} total)`);
+    log(`  ✓ Gmail: ${messages.length} messages fully processed`);
     return { ok: true, messages, totalResults: listData.resultSizeEstimate || messages.length };
   } catch (err) {
     log(`  ✗ Gmail API error: ${err.message}`);
@@ -473,49 +682,123 @@ function extractLeadFromEmail(email, src) {
   const subject = (email.subject || '').trim();
   if (!subject || subject.length < 5) return null;
 
+  // Use subject as title, but relax validation for email subjects (they're usually meaningful)
   let title = cleanTitle(subject);
-  if (!title || title.length < 8) return null;
-  const vlt = validateLiveTitle(title);
-  if (!vlt.pass) return null;
-  if (isNavigationJunk(title)) return null;
+  if (!title || title.length < 8) title = subject.slice(0, 200);
+  if (!title || title.length < 5) return null;
 
-  // Classification based on Gmail label
+  // Build the richest possible combined text from body + linked content + attachments
+  const bodyText = email.bodyText || email.snippet || '';
+  const linkedTexts = (email.linkedContent || []).map(lc => lc.content || '').join('\n\n');
+  const attachTexts = (email.attachmentContent || []).map(ac => ac.content || '').join('\n\n');
+  const fullText = `${subject}\n\n${bodyText}\n\n${linkedTexts}\n\n${attachTexts}`.slice(0, 40000);
+  const combinedText = `${subject} ${bodyText.slice(0, 2000)}`;
+
+  // Classification based on Gmail label + content analysis
   const isRFP = email.scoutLabel === 'rfp' ||
-    /\b(rfq|rfp|invitation\s+to\s+bid|request\s+for\s+(qualifications?|proposals?)|solicitation|bid\s+opportunity)\b/i.test(subject);
+    /\b(rfq|rfp|invitation\s+to\s+bid|request\s+for\s+(qualifications?|proposals?)|solicitation|bid\s+opportunity)\b/i.test(combinedText);
   const isProject = email.scoutLabel === 'projects' ||
-    /\b(tedd|urd|urban\s+renewal|redevelopment|development\s+(project|plan|update)|capital\s+improvement|bond|master\s+plan)\b/i.test(subject);
+    /\b(tedd|urd|urban\s+renewal|redevelopment|development\s+(project|plan|update)|capital\s+improvement|bond|master\s+plan|mra\s+board|funding\s+reservation|design\s+and\s+engineering)\b/i.test(combinedText);
 
   const dashboardLane = isRFP ? 'active_leads' : isProject ? 'development_potentials' : 'news';
   const leadClass = isRFP ? 'active_solicitation' : 'watch_signal';
   const status = isRFP ? 'active' : 'watch';
 
-  // Extract due date from subject/snippet
-  const combinedText = `${subject} ${email.snippet || ''}`;
+  // Extract due date from full text
   const dueDateMatch = combinedText.match(/(?:due|deadline|submit|received)\s+(?:by|before|no later than|until)\s+([A-Z][a-z]+\.?\s+\d{1,2},?\s*\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})/i);
   const actionDueDate = dueDateMatch ? dueDateMatch[1] : '';
 
-  // Extract sender name
   const fromName = (email.from || '').replace(/<[^>]+>/, '').trim() || email.from || 'Email';
 
-  // Infer market from text
+  // Market sector from combined text
   const lo = combinedText.toLowerCase();
   let marketSector = 'Other';
-  if (/\b(school|elementary|k-12)\b/.test(lo)) marketSector = 'K-12';
+  if (/\b(school|elementary|k-12|mcps)\b/.test(lo)) marketSector = 'K-12';
   else if (/\b(university|college|campus)\b/.test(lo)) marketSector = 'Higher Education';
   else if (/\b(hospital|clinic|medical)\b/.test(lo)) marketSector = 'Healthcare';
   else if (/\b(fire station|police|public safety)\b/.test(lo)) marketSector = 'Public Safety';
-  else if (/\b(courthouse|city hall|civic|municipal)\b/.test(lo)) marketSector = 'Civic';
+  else if (/\b(courthouse|city hall|civic|municipal|city\s+council)\b/.test(lo)) marketSector = 'Civic';
   else if (/\b(tedd|urd|redevelopment|mixed.?use|development\s+district)\b/.test(lo)) marketSector = 'Mixed Use';
-  else if (/\b(housing|affordable|residential|apartment)\b/.test(lo)) marketSector = 'Housing';
-  else if (/\b(construction|renovation|building|facility|project)\b/.test(lo)) marketSector = 'Civic';
+  else if (/\b(housing|affordable|residential|apartment|rental\s+unit)\b/.test(lo)) marketSector = 'Housing';
+  else if (/\b(construction|renovation|building|facility|project|infrastructure|water\s+main)\b/.test(lo)) marketSector = 'Civic';
+
+  // Extract budget signals from full text
+  const budgetMatch = fullText.match(/\$[\d,]+(?:\.\d{1,2})?(?:\s*(?:million|m|k))?\b/i);
+  const potentialBudget = budgetMatch ? budgetMatch[0] : '';
 
   const emailDate = email.internalDate
     ? new Date(parseInt(email.internalDate)).toISOString().split('T')[0]
     : new Date().toISOString().split('T')[0];
 
+  // Build rich description from body (not just snippet)
+  const descriptionBody = bodyText.slice(0, 800).trim();
+  const linkedSummary = (email.linkedContent || []).slice(0, 2).map(lc =>
+    `[Linked ${lc.type.toUpperCase()}: ${(lc.title || lc.url || '').slice(0, 60)}] ${(lc.content || '').slice(0, 300)}`
+  ).join('\n');
+  const attachSummary = (email.attachmentContent || []).slice(0, 2).map(ac =>
+    `[Attachment: ${ac.filename}] ${(ac.content || '').slice(0, 300)}`
+  ).join('\n');
+  const fullDescription = [descriptionBody, linkedSummary, attachSummary].filter(Boolean).join('\n\n').slice(0, 2000);
+
+  // Relevance scoring: emails with body content + linked docs get higher scores
+  let relevanceScore = isRFP ? 60 : 35;
+  if (bodyText.length > 500) relevanceScore += 10;  // rich body content
+  if ((email.linkedContent || []).length > 0) relevanceScore += 10;  // followed links
+  if ((email.attachmentContent || []).length > 0) relevanceScore += 5;  // parsed attachments
+  if (budgetMatch) relevanceScore += 5;  // has budget signal
+  relevanceScore = Math.min(relevanceScore, 85);
+
   const id = `lead-gmail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const now = new Date().toISOString();
-  const description = email.snippet ? `${email.snippet.slice(0, 350)}` : subject;
+
+  const evidenceLinks = (email.links || []).slice(0, 5);
+  const evidenceEntries = [
+    {
+      id: `ev-${id}`,
+      leadId: id,
+      sourceId: src.id || src.source_id || '',
+      sourceName: fromName,
+      url: evidenceLinks[0] || '',
+      title: `Email: ${title}`,
+      summary: `${email.scoutLabel} email from ${fromName}, ${emailDate}. ${descriptionBody.slice(0, 300)}`,
+      signalDate: emailDate,
+      dateFound: now,
+      signalStrength: relevanceScore >= 55 ? 'strong' : 'medium',
+      keywords: [],
+    },
+  ];
+  // Add evidence entries for followed links
+  for (const lc of (email.linkedContent || []).slice(0, 3)) {
+    evidenceEntries.push({
+      id: `ev-${id}-link-${evidenceEntries.length}`,
+      leadId: id,
+      sourceId: src.id || src.source_id || '',
+      sourceName: lc.title || lc.url,
+      url: lc.url,
+      title: lc.title || `Linked ${lc.type.toUpperCase()}`,
+      summary: (lc.content || '').slice(0, 400),
+      signalDate: emailDate,
+      dateFound: now,
+      signalStrength: 'medium',
+      keywords: [],
+    });
+  }
+  // Add evidence for attachments
+  for (const ac of (email.attachmentContent || []).slice(0, 2)) {
+    evidenceEntries.push({
+      id: `ev-${id}-att-${evidenceEntries.length}`,
+      leadId: id,
+      sourceId: src.id || src.source_id || '',
+      sourceName: ac.filename,
+      url: '',
+      title: `PDF Attachment: ${ac.filename}`,
+      summary: (ac.content || '').slice(0, 400),
+      signalDate: emailDate,
+      dateFound: now,
+      signalStrength: 'medium',
+      keywords: [],
+    });
+  }
 
   return {
     id,
@@ -526,18 +809,18 @@ function extractLeadFromEmail(email, src) {
     county: 'Missoula',
     marketSector,
     projectType: isRFP ? 'RFQ/RFP' : 'Other',
-    description: `${description} — Source: Email (${fromName})`,
+    description: `${fullDescription} — Source: Email (${fromName})`,
     whyItMatters: isRFP
       ? `Procurement notice received via email from ${fromName}. Review scope and deadline.`
-      : `Development update received via email from ${fromName}. Monitor for project opportunities.`,
-    aiReasonForAddition: `Email intake (${email.scoutLabel}) from ${fromName}, received ${emailDate}.`,
+      : `Development update received via email from ${fromName}. ${potentialBudget ? `Budget signal: ${potentialBudget}. ` : ''}Monitor for project opportunities.`,
+    aiReasonForAddition: `Email intake (${email.scoutLabel}) from ${fromName}, received ${emailDate}. Body: ${bodyText.length} chars. Linked docs: ${(email.linkedContent||[]).length}. Attachments: ${(email.attachmentContent||[]).length}.`,
     potentialTimeline: '',
-    potentialBudget: '',
+    potentialBudget,
     action_due_date: actionDueDate,
-    relevanceScore: isRFP ? 60 : 35,
+    relevanceScore,
     pursuitScore: isRFP ? 40 : 15,
-    sourceConfidenceScore: 65,
-    confidenceNotes: `Email from ${fromName}. Label: Scout/${email.scoutLabel}. Received ${emailDate}.`,
+    sourceConfidenceScore: 75,
+    confidenceNotes: `Email from ${fromName}. Label: Scout/${email.scoutLabel}. Received ${emailDate}. Body ${bodyText.length} chars. ${(email.linkedContent||[]).length} linked doc(s). ${(email.attachmentContent||[]).length} attachment(s).`,
     dateDiscovered: now,
     originalSignalDate: emailDate,
     lastCheckedDate: now,
@@ -547,35 +830,26 @@ function extractLeadFromEmail(email, src) {
     dashboard_lane: dashboardLane,
     watchCategory: isRFP ? 'named_project' : isProject ? 'development_program' : 'named_project',
     projectStatus: isRFP ? 'active_solicitation' : 'future_watch',
-    extractionPath: 'gmail_api',
+    extractionPath: 'gmail_api_full',
     gmailMessageId: email.id,
     emailFrom: email.from,
     emailDate,
     sourceName: src.name || src.source_name || 'Gmail Intake',
     sourceUrl: '',
     sourceId: src.id || src.source_id || '',
-    evidenceLinks: email.links?.slice(0, 3) || [],
-    evidenceSourceLinks: [{ url: '', label: `Email from ${fromName}`, linkType: 'email' }],
-    evidenceSummary: `Email intake (${email.scoutLabel}): ${title}. From ${fromName}, received ${emailDate}. ${description.slice(0, 200)}`,
+    evidenceLinks,
+    evidenceSourceLinks: [
+      { url: '', label: `Email from ${fromName}`, linkType: 'email' },
+      ...(email.linkedContent || []).slice(0, 3).map(lc => ({ url: lc.url, label: lc.title || lc.url, linkType: lc.type })),
+    ],
+    evidenceSummary: `Email intake (${email.scoutLabel}): ${title}. From ${fromName}, received ${emailDate}. ${fullDescription.slice(0, 500)}`,
     matchedFocusPoints: [],
     matchedKeywords: [],
     matchedTargetOrgs: [],
     taxonomyMatches: [],
     internalContact: '',
     notes: '',
-    evidence: [{
-      id: `ev-${id}`,
-      leadId: id,
-      sourceId: src.id || src.source_id || '',
-      sourceName: fromName,
-      url: email.links?.[0] || '',
-      title: `Email: ${title}`,
-      summary: `${email.scoutLabel} email from ${fromName}, ${emailDate}. ${description.slice(0, 200)}`,
-      signalDate: emailDate,
-      dateFound: now,
-      signalStrength: isRFP ? 'strong' : 'medium',
-      keywords: [],
-    }],
+    evidence: evidenceEntries,
   };
 }
 
@@ -4519,8 +4793,8 @@ export default async function handler(req, res) {
         }
       } catch (e) { log(`✗ Labels fetch error: ${e.message}`); }
 
-      // 2. Run the current Scout query
-      const scoutQuery = 'label:Scout newer_than:7d';
+      // 2. Run the dynamic Scout query (same logic the scan engine uses)
+      const scoutQuery = await buildGmailQuery(token, 7, log);
       let scoutResults = 0;
       try {
         const scoutResp = await fetch(`${GMAIL_API_BASE}/messages?q=${encodeURIComponent(scoutQuery)}&maxResults=5`, {
@@ -4565,26 +4839,27 @@ export default async function handler(req, res) {
         }
       } catch (e) { log(`✗ Broad query error: ${e.message}`); }
 
-      // 4. Pipeline depth assessment
+      // 4. Pipeline depth assessment (v4-b25: updated to reflect full ingestion)
       log('');
-      log('── Gmail Pipeline Depth Assessment ──');
+      log('── Gmail Pipeline Depth Assessment (v4-b25) ──');
       log('✓ Auth: working (OAuth2 refresh → access token)');
-      log('✓ Query: label:Scout newer_than:7d');
+      log(`✓ Query: dynamic label matching (${scoutQuery.slice(0, 80)})`);
       log(`${scoutResults > 0 ? '✓' : '⚠'} Messages: ${scoutResults} matching Scout query`);
-      log('⚠ Fetch format: metadata only (Subject, From, Date, snippet)');
-      log('✗ Full body parsing: NOT implemented — only snippet (~100 chars) is read');
-      log('✗ Link following: NOT implemented — URLs in evidenceLinks are stored but never fetched');
-      log('✗ Attachment handling: NOT implemented — no code to detect or download attachments');
+      log('✓ Fetch format: FULL (text/plain + text/html MIME decoded)');
+      log('✓ Full body parsing: IMPLEMENTED — reads entire email body');
+      log('✓ Link following: IMPLEMENTED — follows gov/edu/org links + PDFs (up to 3 per email)');
+      log('✓ PDF parsing: IMPLEMENTED — uses unpdf for linked PDFs + attachments');
+      log('✓ Attachment handling: IMPLEMENTED — detects and parses PDF attachments');
       log('');
       if (scoutResults === 0 && broadResults > 0) {
-        log('DIAGNOSIS: Auth works, mailbox has messages, but none have the "Scout" label.');
-        log('ACTION: In Gmail, create a label called "Scout" and sub-labels Scout/News, Scout/RFP, Scout/Projects.');
-        log('Then label at least one test email with "Scout" and re-run.');
+        log('DIAGNOSIS: Auth works, mailbox has messages, but none match the dynamic Scout query.');
+        log(`The query used was: ${scoutQuery}`);
+        log('ACTION: Label at least one email with Work/Scout/News (or /RFP or /Projects) and re-run.');
       } else if (scoutResults === 0 && broadResults === 0) {
         log('DIAGNOSIS: Auth works but the mailbox appears empty (no messages in last 14 days).');
-        log('ACTION: Send a test email to the Scout Gmail account, label it "Scout", then re-run.');
+        log('ACTION: Send a test email to the Scout Gmail account, label it with a Scout label, then re-run.');
       } else {
-        log('DIAGNOSIS: Gmail pipeline is receiving messages. Check scan logs for lead extraction output.');
+        log('DIAGNOSIS: Gmail pipeline is receiving messages and will process them with full-depth ingestion.');
       }
 
       return res.status(200).json({
@@ -4598,11 +4873,11 @@ export default async function handler(req, res) {
           sampleMessages: sampleSubjects,
           pipelineDepth: {
             auth: 'working',
-            messageQuery: 'working',
-            messageFetch: 'metadata_only (Subject, From, Date, snippet)',
-            bodyParsing: 'NOT_IMPLEMENTED',
-            linkFollowing: 'NOT_IMPLEMENTED',
-            attachmentHandling: 'NOT_IMPLEMENTED',
+            messageQuery: 'dynamic_label_matching',
+            messageFetch: 'full (text/plain + text/html MIME decoded)',
+            bodyParsing: 'IMPLEMENTED (base64url decode, MIME recursion)',
+            linkFollowing: 'IMPLEMENTED (HTML + PDF, up to 3 per email)',
+            attachmentHandling: 'IMPLEMENTED (PDF attachments parsed via unpdf)',
           },
         },
         logs, ts: new Date().toISOString(),
