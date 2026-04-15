@@ -6724,6 +6724,8 @@ export default function ProjectScout() {
   }, []); // Run once on mount only
 
   const [activeTab, setActiveTab] = useState('rfp');
+  // v4-b26: News sub-section navigation (executive brief / project-relevant / all-source)
+  const [newsSection, setNewsSection] = useState('brief');
   // v4-tabfix: hard-guarantee real-tab behavior. If activeTab somehow ends up
   // outside the canonical TABS list (e.g. stale 'active' / 'overview' from older
   // builds), snap it back to 'rfp' so the main panel never renders blank.
@@ -8245,17 +8247,67 @@ export default function ProjectScout() {
           </p>
         </div>
 
-        {/* v4-b25: News tab — project-intelligence highlights */}
+        {/* v4-b26: News tab — executive intelligence brief */}
         {activeTab === 'news' && (() => {
-          const newsLeads = leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l));
-          // Sort: high potential first, then medium, then low, then by relevance
+          // ── Gather all news-lane leads ──
+          const allNews = leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l));
+          // Also pull project-lane leads for the project-relevant section
+          const allProjects = leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l));
+          const allItems = [...allNews, ...allProjects];
+
+          // ── Date helpers ──
+          const now = Date.now();
+          const DAY = 86400000;
+          const getItemDate = (l) => {
+            const d = l.originalSignalDate || l.emailDate || l.dateDiscovered || l.dateAdded || l.lastCheckedDate;
+            return d ? new Date(d).getTime() : 0;
+          };
+          const within7d = allItems.filter(l => (now - getItemDate(l)) <= 7 * DAY);
+          const within30d = allItems.filter(l => (now - getItemDate(l)) <= 30 * DAY);
+
+          // ── Sort by potential then score ──
           const potentialOrder = { high: 0, medium: 1, low: 2 };
-          const sorted = [...newsLeads].sort((a, b) => {
+          const sortItems = (arr) => [...arr].sort((a, b) => {
             const pa = potentialOrder[a.projectPotential] ?? 2;
             const pb = potentialOrder[b.projectPotential] ?? 2;
             if (pa !== pb) return pa - pb;
             return (b.relevanceScore || 0) - (a.relevanceScore || 0);
           });
+
+          // ── Project-relevant filter ──
+          const isProjectRelevant = (l) => {
+            if (l.projectPotential === 'high' || l.projectPotential === 'medium') return true;
+            const txt = `${l.title || ''} ${l.whyItMatters || ''} ${l.highlightSummary || ''} ${l.description || ''}`.toLowerCase();
+            return /\b(development|building|construction|redevelopment|funding|infrastructure|design|engineering|housing|capital|bond|rfp|rfq|solicitation|procurement|renovation|facility|expansion|master plan|rezoning|subdivision|annexation|permit|water main|sewer|bridge|street)\b/.test(txt);
+          };
+          const projectRelevant30d = sortItems(within30d.filter(isProjectRelevant));
+
+          // ── Executive synopsis builder ──
+          const buildSynopsis = (items) => {
+            if (items.length === 0) return null;
+            const sorted = sortItems(items);
+            const high = sorted.filter(l => l.projectPotential === 'high');
+            const med = sorted.filter(l => l.projectPotential === 'medium');
+            const low = sorted.filter(l => l.projectPotential !== 'high' && l.projectPotential !== 'medium');
+
+            // Theme extraction
+            const themes = new Map();
+            for (const l of sorted) {
+              const ms = l.marketSector || 'Other';
+              if (ms !== 'Other') themes.set(ms, (themes.get(ms) || 0) + 1);
+            }
+            const topThemes = [...themes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => k);
+
+            // Budget signals
+            const budgets = sorted.filter(l => l.potentialBudget).map(l => ({ title: l.title, budget: l.potentialBudget }));
+
+            return { total: items.length, high: high.length, med: med.length, low: low.length, topThemes, budgets, topItems: sorted.slice(0, 6) };
+          };
+
+          const syn7 = buildSynopsis(within7d);
+          const syn30 = buildSynopsis(within30d);
+
+          // ── Shared components ──
           const potentialBadge = (level) => {
             const styles = {
               high: { bg: '#dcfce7', color: '#166534', border: '#bbf7d0' },
@@ -8265,63 +8317,172 @@ export default function ProjectScout() {
             const s = styles[level] || styles.low;
             return <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: s.bg, color: s.color, border: `1px solid ${s.border}`, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{level || 'low'}</span>;
           };
-          return sorted.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {sorted.map(lead => (
-                <div key={lead.id} onClick={() => handleSelectLead(lead)} style={{
-                  padding: '14px 18px', background: '#fff',
-                  borderRadius: 10, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s',
-                  borderLeft: lead.projectPotential === 'high' ? '3px solid #22c55e' : lead.projectPotential === 'medium' ? '3px solid #f59e0b' : '3px solid #e2e8f0',
-                }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.boxShadow = 'none'; }}
-                >
-                  {/* Row 1: Title + potential badge + score */}
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{cleanHtmlEntities(lead.title)}</span>
-                        {potentialBadge(lead.projectPotential)}
-                      </div>
+
+          const SynopsisBlock = ({ syn, label, accent }) => {
+            if (!syn) return <div style={{ padding: '16px 0', fontSize: 12, color: '#94a3b8' }}>No items in this period. Run a scan to populate.</div>;
+            return (
+              <div style={{ padding: '14px 18px', background: '#fff', borderRadius: 10, border: '1px solid #f1f5f9', borderLeft: `3px solid ${accent}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{label}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: '#f1f5f9', color: '#64748b' }}>{syn.total} item{syn.total !== 1 ? 's' : ''}</span>
+                  {syn.high > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#dcfce7', color: '#166534' }}>{syn.high} HIGH</span>}
+                  {syn.med > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>{syn.med} MEDIUM</span>}
+                </div>
+                {/* Theme chips */}
+                {syn.topThemes.length > 0 && (
+                  <div style={{ display: 'flex', gap: 5, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '20px' }}>Themes</span>
+                    {syn.topThemes.map(t => <span key={t} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: '#eff6ff', color: '#1e40af', fontWeight: 500 }}>{t}</span>)}
+                  </div>
+                )}
+                {/* Budget signals */}
+                {syn.budgets.length > 0 && (
+                  <div style={{ display: 'flex', gap: 5, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '20px' }}>Budget signals</span>
+                    {syn.budgets.slice(0, 3).map((b, i) => <span key={i} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: '#fffbeb', color: '#b45309', fontWeight: 600 }}>{b.budget} — {(b.title || '').slice(0, 40)}</span>)}
+                  </div>
+                )}
+                {/* Top items (linked back to detail) */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {syn.topItems.map(l => (
+                    <div key={l.id} onClick={() => handleSelectLead(l)} style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                      background: '#fafbfc', border: '1px solid transparent', transition: 'all 0.12s',
+                    }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#f0f4ff'; e.currentTarget.style.borderColor = '#c7d2fe'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '#fafbfc'; e.currentTarget.style.borderColor = 'transparent'; }}
+                    >
+                      {potentialBadge(l.projectPotential)}
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanHtmlEntities(l.title)}</span>
+                      {l.whyItMatters && <span style={{ fontSize: 10, color: '#64748b', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>{l.whyItMatters}</span>}
+                      <ScoreRing score={l.relevanceScore || 0} size={24} strokeWidth={2} />
                     </div>
-                    <ScoreRing score={lead.relevanceScore || 0} size={30} strokeWidth={2.5} />
-                  </div>
-                  {/* Row 2: Highlight summary */}
-                  {(lead.highlightSummary || lead.description) && (
-                    <p style={{ fontSize: 12, color: '#475569', margin: '0 0 6px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {cleanHtmlEntities(lead.highlightSummary || cleanDescriptionForCard(lead.description)).slice(0, 280)}
-                    </p>
-                  )}
-                  {/* Row 3: Why it matters + What to watch */}
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11, lineHeight: 1.4 }}>
-                    {lead.whyItMatters && (
-                      <div style={{ flex: 1, minWidth: 160 }}>
-                        <span style={{ fontWeight: 700, color: '#1d4ed8', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Why it matters</span>
-                        <div style={{ color: '#64748b', marginTop: 1 }}>{lead.whyItMatters}</div>
-                      </div>
-                    )}
-                    {lead.whatToWatch && (
-                      <div style={{ flex: 1, minWidth: 160 }}>
-                        <span style={{ fontWeight: 700, color: '#7c3aed', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>What to watch</span>
-                        <div style={{ color: '#64748b', marginTop: 1 }}>{lead.whatToWatch}</div>
-                      </div>
-                    )}
-                  </div>
-                  {/* Row 4: Meta line */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                    {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8' }}>{lead.sourceName}</span>}
-                    {lead.potentialBudget && <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309' }}>{lead.potentialBudget}</span>}
-                    {lead.marketSector && lead.marketSector !== 'Other' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>{lead.marketSector}</span>}
-                    {lead.emailDate && <span style={{ fontSize: 10, color: '#cbd5e1' }}>{lead.emailDate}</span>}
+                  ))}
+                </div>
+              </div>
+            );
+          };
+
+          // ── Item card (reused for project-relevant + all-source sections) ──
+          const NewsCard = ({ lead }) => (
+            <div onClick={() => handleSelectLead(lead)} style={{
+              padding: '14px 18px', background: '#fff', borderRadius: 10, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s',
+              borderLeft: lead.projectPotential === 'high' ? '3px solid #22c55e' : lead.projectPotential === 'medium' ? '3px solid #f59e0b' : '3px solid #e2e8f0',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.boxShadow = 'none'; }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{cleanHtmlEntities(lead.title)}</span>
+                    {potentialBadge(lead.projectPotential)}
                   </div>
                 </div>
-              ))}
+                <ScoreRing score={lead.relevanceScore || 0} size={28} strokeWidth={2.5} />
+              </div>
+              {(lead.highlightSummary || lead.description) && (
+                <p style={{ fontSize: 11.5, color: '#475569', margin: '0 0 5px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {cleanHtmlEntities(lead.highlightSummary || cleanDescriptionForCard(lead.description)).slice(0, 220)}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 10.5, lineHeight: 1.4 }}>
+                {lead.whyItMatters && <div><span style={{ fontWeight: 700, color: '#1d4ed8' }}>Signal: </span><span style={{ color: '#64748b' }}>{lead.whyItMatters}</span></div>}
+                {lead.whatToWatch && <div><span style={{ fontWeight: 700, color: '#7c3aed' }}>Watch: </span><span style={{ color: '#64748b' }}>{lead.whatToWatch}</span></div>}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8' }}>{lead.sourceName}</span>}
+                {lead.potentialBudget && <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309' }}>{lead.potentialBudget}</span>}
+                {lead.marketSector && lead.marketSector !== 'Other' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>{lead.marketSector}</span>}
+              </div>
             </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
-              <Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
-              <p style={{ fontSize: 14, fontWeight: 600 }}>No news highlights yet</p>
-              <p style={{ fontSize: 12 }}>Run a scan to find project-relevant news from Missoula County sources</p>
+          );
+
+          // ── Section divider ──
+          const SectionHead = ({ icon, title, count, accent }) => (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '20px 0 10px' }}>
+              {icon}
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{title}</span>
+              {count !== undefined && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: accent || '#f1f5f9', color: '#fff' }}>{count}</span>}
+              <div style={{ flex: 1, height: 1, background: '#e2e8f0' }} />
+            </div>
+          );
+
+          return (
+            <div>
+              {/* ── Sub-navigation ── */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 18, borderBottom: '1px solid #f1f5f9', paddingBottom: 8 }}>
+                {[
+                  { id: 'brief', label: 'Executive Brief', count: (syn7?.total || 0) + (syn30?.total || 0) },
+                  { id: 'projects', label: 'Project-Relevant Updates', count: projectRelevant30d.length },
+                  { id: 'all', label: 'All Source News', count: allNews.length },
+                ].map(s => (
+                  <button key={s.id} onClick={() => setNewsSection(s.id)} style={{
+                    padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                    fontSize: 12, fontWeight: 600,
+                    background: newsSection === s.id ? '#0f172a' : 'transparent',
+                    color: newsSection === s.id ? '#fff' : '#64748b',
+                    transition: 'all 0.12s',
+                  }}>
+                    {s.label} <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 3 }}>{s.count}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* ══ SECTION 1: Executive Brief ══ */}
+              {newsSection === 'brief' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <SynopsisBlock syn={syn7} label="Last 7 Days" accent="#3b82f6" />
+                  <SynopsisBlock syn={syn30} label="Last 30 Days" accent="#8b5cf6" />
+                  {!syn7 && !syn30 && (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+                      <Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
+                      <p style={{ fontSize: 14, fontWeight: 600 }}>No intelligence yet</p>
+                      <p style={{ fontSize: 12 }}>Run a scan to populate the executive brief with Missoula County project intelligence</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ══ SECTION 2: Project-Relevant Updates ══ */}
+              {newsSection === 'projects' && (
+                <div>
+                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 14, lineHeight: 1.5 }}>
+                    Items most likely to become A&E opportunities — development, construction, redevelopment, infrastructure, design/engineering, funding, and procurement signals from the last 30 days.
+                  </p>
+                  {projectRelevant30d.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {projectRelevant30d.map(l => <NewsCard key={l.id} lead={l} />)}
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+                      <Target size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
+                      <p style={{ fontSize: 14, fontWeight: 600 }}>No project-relevant updates yet</p>
+                      <p style={{ fontSize: 12 }}>Run a scan to find development and project signals in the last 30 days</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ══ SECTION 3: All Source News ══ */}
+              {newsSection === 'all' && (
+                <div>
+                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 14, lineHeight: 1.5 }}>
+                    All scanned news items — the complete underlying feed from Missoula County sources.
+                  </p>
+                  {allNews.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {sortItems(allNews).map(l => <NewsCard key={l.id} lead={l} />)}
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+                      <Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
+                      <p style={{ fontSize: 14, fontWeight: 600 }}>No news items yet</p>
+                      <p style={{ fontSize: 12 }}>Run a scan to populate Missoula County news</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })()}
