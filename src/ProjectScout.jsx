@@ -8237,7 +8237,7 @@ export default function ProjectScout() {
             {TABS.find(t => t.id === activeTab)?.label || 'Project Scout'}
           </h1>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>
-            {activeTab === 'news' && 'Missoula County development news, project updates, and market signals'}
+            {activeTab === 'news' && 'Project-relevant news highlights — items that might become opportunities'}
             {activeTab === 'rfp' && 'Active solicitations and procurement opportunities in Missoula County'}
             {activeTab === 'projects' && 'Strategic districts, future projects, and development opportunities'}
             {activeTab === 'asana' && `${submittedLeads.length} pursuit${submittedLeads.length !== 1 ? 's' : ''} tracked in Asana`}
@@ -8245,27 +8245,74 @@ export default function ProjectScout() {
           </p>
         </div>
 
-        {/* v4-b22: News tab — compact news items */}
+        {/* v4-b25: News tab — project-intelligence highlights */}
         {activeTab === 'news' && (() => {
           const newsLeads = leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l));
-          return newsLeads.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {newsLeads.map(lead => (
+          // Sort: high potential first, then medium, then low, then by relevance
+          const potentialOrder = { high: 0, medium: 1, low: 2 };
+          const sorted = [...newsLeads].sort((a, b) => {
+            const pa = potentialOrder[a.projectPotential] ?? 2;
+            const pb = potentialOrder[b.projectPotential] ?? 2;
+            if (pa !== pb) return pa - pb;
+            return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+          });
+          const potentialBadge = (level) => {
+            const styles = {
+              high: { bg: '#dcfce7', color: '#166534', border: '#bbf7d0' },
+              medium: { bg: '#fef3c7', color: '#92400e', border: '#fde68a' },
+              low: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' },
+            };
+            const s = styles[level] || styles.low;
+            return <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: s.bg, color: s.color, border: `1px solid ${s.border}`, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{level || 'low'}</span>;
+          };
+          return sorted.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {sorted.map(lead => (
                 <div key={lead.id} onClick={() => handleSelectLead(lead)} style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#fff',
+                  padding: '14px 18px', background: '#fff',
                   borderRadius: 10, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s',
+                  borderLeft: lead.projectPotential === 'high' ? '3px solid #22c55e' : lead.projectPotential === 'medium' ? '3px solid #f59e0b' : '3px solid #e2e8f0',
                 }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.boxShadow = 'none'; }}
                 >
-                  <Radio size={13} style={{ color: '#3b82f6', flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{cleanHtmlEntities(lead.title)}</div>
-                    {lead.description && <p style={{ fontSize: 11.5, color: '#64748b', margin: '3px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanDescriptionForCard(cleanHtmlEntities(lead.description)).slice(0, 120)}</p>}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.sourceName}</span>}
+                  {/* Row 1: Title + potential badge + score */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{cleanHtmlEntities(lead.title)}</span>
+                        {potentialBadge(lead.projectPotential)}
+                      </div>
+                    </div>
                     <ScoreRing score={lead.relevanceScore || 0} size={30} strokeWidth={2.5} />
+                  </div>
+                  {/* Row 2: Highlight summary */}
+                  {(lead.highlightSummary || lead.description) && (
+                    <p style={{ fontSize: 12, color: '#475569', margin: '0 0 6px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {cleanHtmlEntities(lead.highlightSummary || cleanDescriptionForCard(lead.description)).slice(0, 280)}
+                    </p>
+                  )}
+                  {/* Row 3: Why it matters + What to watch */}
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11, lineHeight: 1.4 }}>
+                    {lead.whyItMatters && (
+                      <div style={{ flex: 1, minWidth: 160 }}>
+                        <span style={{ fontWeight: 700, color: '#1d4ed8', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Why it matters</span>
+                        <div style={{ color: '#64748b', marginTop: 1 }}>{lead.whyItMatters}</div>
+                      </div>
+                    )}
+                    {lead.whatToWatch && (
+                      <div style={{ flex: 1, minWidth: 160 }}>
+                        <span style={{ fontWeight: 700, color: '#7c3aed', fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>What to watch</span>
+                        <div style={{ color: '#64748b', marginTop: 1 }}>{lead.whatToWatch}</div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Row 4: Meta line */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                    {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8' }}>{lead.sourceName}</span>}
+                    {lead.potentialBudget && <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309' }}>{lead.potentialBudget}</span>}
+                    {lead.marketSector && lead.marketSector !== 'Other' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>{lead.marketSector}</span>}
+                    {lead.emailDate && <span style={{ fontSize: 10, color: '#cbd5e1' }}>{lead.emailDate}</span>}
                   </div>
                 </div>
               ))}
@@ -8273,8 +8320,8 @@ export default function ProjectScout() {
           ) : (
             <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
               <Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
-              <p style={{ fontSize: 14, fontWeight: 600 }}>No news items yet</p>
-              <p style={{ fontSize: 12 }}>Run a scan to populate Missoula County news and development signals</p>
+              <p style={{ fontSize: 14, fontWeight: 600 }}>No news highlights yet</p>
+              <p style={{ fontSize: 12 }}>Run a scan to find project-relevant news from Missoula County sources</p>
             </div>
           );
         })()}

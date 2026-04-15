@@ -853,6 +853,319 @@ function extractLeadFromEmail(email, src) {
   };
 }
 
+// ── v4-b25: Multi-highlight extraction from emails ─────────────
+// Splits a rich email (or web article) into multiple project-focused highlights.
+// Each highlight has: normalized title, brief summary, project potential, why it matters, what to watch.
+
+// Known project-signal patterns for splitting multi-topic content
+const HIGHLIGHT_SPLIT_PATTERNS = [
+  // Named projects / locations
+  /(?:^|\n)\s*(?:#{1,3}\s*)?(?:\d+[\.\)]\s*)?([A-Z][A-Za-z0-9\s\/\-']+(?:Crossing|Triangle|District|Avenue|Street|Creek|Park|Building|Center|Campus|Station|Bridge|Main|Corridor|Block|Heights|Place|Square|Village|Landing|Terrace|Meadows|Ranch|Trail|Complex|Hub|Mill|Point|Reservoir|Plant|Facility))\b/g,
+  // "Request for/to" patterns (board actions)
+  /(?:request\s+(?:for|to)\s+(?:approve|fund|authorize|solicit|extend|modify|amend|designate)\s+)([^.;]{15,120})/gi,
+  // Dollar amounts attached to named items
+  /(\$[\d,.]+\s*(?:million|M|k)?\s+(?:for|to|toward|requested|allocated|approved|budgeted)\s+[^.;]{10,100})/gi,
+  // "Action Item:" or "Resolution:" style
+  /(?:action\s*item|resolution|motion|ordinance|approval|authorization)\s*(?:\d+)?[:\-]\s*([^.;\n]{15,150})/gi,
+];
+
+// Signal phrases that indicate project potential level
+const HIGH_POTENTIAL_SIGNALS = /\b(rfq|rfp|solicitation|bid|procurement|design\s+contract|engineering\s+services|construction\s+(?:contract|funding|bid)|consultant\s+selection|awarded|design.build|pre.?design|schematic\s+design|groundbreaking)\b/i;
+const MEDIUM_POTENTIAL_SIGNALS = /\b(funding\s+(?:reservation|request|application|approved)|bond|levy|capital\s+(?:improvement|budget|project)|master\s+plan|feasibility|site\s+(?:selection|plan)|development\s+(?:agreement|review)|rezoning|annexation|conditional\s+use|subdivision|infrastructure|water\s+main|sewer|utility)\b/i;
+
+// Map signal types to "why it matters" and "what to watch" suggestions
+function inferWhyAndWatch(text) {
+  const lo = (text || '').toLowerCase();
+  let whyItMatters = '';
+  let whatToWatch = '';
+  if (/\b(rfq|rfp|solicitation|bid\s+opportunity|invitation\s+to\s+bid)\b/.test(lo)) {
+    whyItMatters = 'Active procurement signal — potential A&E opportunity';
+    whatToWatch = 'RFP/RFQ release, submission deadline, scope details';
+  } else if (/\bfunding\s+(reservation|request|approved|application)\b/.test(lo)) {
+    whyItMatters = 'Funding milestone advancing project toward design/construction';
+    whatToWatch = 'Funding approval, design contract, scope definition';
+  } else if (/\bdesign\s+and\s+engineering\b|\bengineering\s+services\b|\bconsultant\s+selection\b/.test(lo)) {
+    whyItMatters = 'Design and engineering services authorized — near-term A&E opportunity';
+    whatToWatch = 'Scope/design contract, RFP/RFQ release, consultant shortlist';
+  } else if (/\b(bond|levy|capital\s+improvement)\b/.test(lo)) {
+    whyItMatters = 'Capital funding mechanism progressing — future project pipeline';
+    whatToWatch = 'Bond/levy vote, CIP prioritization, project list release';
+  } else if (/\b(rezoning|annexation|subdivision|conditional\s+use|land\s+use)\b/.test(lo)) {
+    whyItMatters = 'Planning or land use milestone — development likely to follow';
+    whatToWatch = 'Development review, site plan approval, building permit';
+  } else if (/\b(redevelopment|urban\s+renewal|tedd|urd|mra)\b/.test(lo)) {
+    whyItMatters = 'Redevelopment program activity — public infrastructure and development';
+    whatToWatch = 'City Council approval, development agreements, infrastructure scope';
+  } else if (/\b(infrastructure|water\s+main|sewer|utility|street|bridge|road)\b/.test(lo)) {
+    whyItMatters = 'Infrastructure scope tied to future development';
+    whatToWatch = 'Engineering scope definition, design contract, construction funding';
+  } else if (/\b(housing|affordable|residential|mixed.?use|rental)\b/.test(lo)) {
+    whyItMatters = 'Housing/mixed-use development advancing';
+    whatToWatch = 'Development review, funding applications, design contract';
+  } else if (/\b(approved|authorized|passed|adopted|granted|awarded)\b/.test(lo)) {
+    whyItMatters = 'Board/council action advancing project';
+    whatToWatch = 'Next implementation steps, scope definition, procurement timeline';
+  } else {
+    whyItMatters = 'Development or project intelligence signal';
+    whatToWatch = 'Monitor for procurement or design opportunity';
+  }
+  return { whyItMatters, whatToWatch };
+}
+
+function scoreProjectPotential(text) {
+  if (HIGH_POTENTIAL_SIGNALS.test(text)) return 'high';
+  if (MEDIUM_POTENTIAL_SIGNALS.test(text)) return 'medium';
+  return 'low';
+}
+
+// Generate a brief 2-4 sentence highlight summary
+function generateHighlightSummary(title, bodyChunk, budget) {
+  const sentences = bodyChunk
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .filter(s => s.length > 20 && s.length < 300)
+    .filter(s => !/^(click|view|read|subscribe|unsubscribe|forward|share|follow|visit|learn more)/i.test(s.trim()));
+
+  // Pick the most informative sentences (those mentioning the title words or key signals)
+  const titleWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  const scored = sentences.map(s => {
+    const lo = s.toLowerCase();
+    let score = 0;
+    for (const w of titleWords) if (lo.includes(w)) score += 2;
+    if (/\$[\d,]+/.test(s)) score += 3;
+    if (/\b(approved|authorized|funded|awarded|requested|proposed|planned|design|construct|renovate|build)\b/i.test(s)) score += 2;
+    if (/\b(rfp|rfq|solicitation|bid|contract|procurement)\b/i.test(s)) score += 3;
+    return { s, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored.slice(0, 3).map(x => x.s.trim());
+
+  let summary = best.join(' ').slice(0, 400);
+  if (budget && !summary.includes(budget)) summary += ` Budget signal: ${budget}.`;
+  return summary || `${title} — project intelligence from Missoula County sources.`;
+}
+
+// Normalize a title: prefer project/location name over generic newsletter subject
+function normalizeHighlightTitle(rawTitle, bodyChunk) {
+  // If the raw title is already a specific project name (< 80 chars, not a generic pattern), keep it
+  if (rawTitle.length < 80 && !/\b(quick take|action summary|newsletter|edition|update|digest|bulletin|weekly|monthly|daily|roundup|recap)\b/i.test(rawTitle)) {
+    return rawTitle;
+  }
+
+  // Try to extract a project name from the body chunk
+  const lo = bodyChunk.toLowerCase();
+  // Named crossing / district / facility / building patterns
+  const namedMatch = bodyChunk.match(/\b([A-Z][A-Za-z0-9\s\/\-']{5,60}(?:Crossing|Triangle|District|Avenue|Street|Creek|Park|Building|Center|Campus|Station|Bridge|Corridor|Block|Heights|Place|Village|Landing|Complex|Hub|Mill|Point|Facility|Plant|Main))\b/);
+  if (namedMatch) return namedMatch[1].trim();
+
+  // "Franklin Crossing / 1919 North Avenue West" style
+  const slashName = bodyChunk.match(/\b([A-Z][A-Za-z]+\s+(?:Crossing|Park|Center|Village|Heights|Landing|Station|Bridge|Place|Block|Hub)\s*\/\s*[^.;\n]{5,60})/);
+  if (slashName) return slashName[1].trim();
+
+  // Fall back to cleaned raw title
+  return rawTitle.replace(/^(the\s+)?quick\s+take:\s*/i, '').replace(/\s*edition\s*.*$/i, '').replace(/\s+for\s+\d{1,2}\/\d{1,2}\/\d{2,4}$/i, '').trim() || rawTitle;
+}
+
+/**
+ * Extract multiple project highlights from a single email.
+ * Returns an array of highlight-lead objects (can be 1 or more).
+ * Each has enriched fields: highlightSummary, projectPotential, whyItMatters, whatToWatch.
+ */
+function extractHighlightsFromEmail(email, src, existingLeads = []) {
+  const subject = (email.subject || '').trim();
+  if (!subject || subject.length < 5) return [];
+
+  const bodyText = email.bodyText || email.snippet || '';
+  const linkedTexts = (email.linkedContent || []).map(lc => lc.content || '').join('\n\n');
+  const attachTexts = (email.attachmentContent || []).map(ac => ac.content || '').join('\n\n');
+  const fullText = `${bodyText}\n\n${linkedTexts}\n\n${attachTexts}`;
+  const combinedShort = `${subject} ${bodyText.slice(0, 3000)}`;
+
+  const fromName = (email.from || '').replace(/<[^>]+>/, '').trim() || 'Email';
+  const emailDate = email.internalDate
+    ? new Date(parseInt(email.internalDate)).toISOString().split('T')[0]
+    : new Date().toISOString().split('T')[0];
+  const now = new Date().toISOString();
+
+  // Detect if this is a multi-topic newsletter/digest (vs a single-topic email)
+  const isNewsletter = /\b(quick take|action summary|newsletter|digest|bulletin|roundup|recap|board meeting edition)\b/i.test(subject);
+
+  // Step 1: Try to split into multiple highlight chunks
+  const chunks = [];
+  if (isNewsletter && fullText.length > 300) {
+    // Split by section headers, numbered items, horizontal rules, or major topic breaks
+    const sections = fullText.split(/(?:\n\s*(?:#{1,3}\s+|(?:\d+[\.\)]\s+)|(?:—{3,}|-{3,}|={3,}|_{3,})\s*\n|\n\s*\n\s*(?=[A-Z][A-Za-z\s\/]{10,60}(?:\n|:))))/);
+    for (const sec of sections) {
+      const trimmed = sec.trim();
+      if (trimmed.length < 80) continue; // too short to be meaningful
+      // Check if this section has project-relevant content
+      if (/\b(project|construction|design|renovation|building|facility|development|housing|infrastructure|funding|capital|rfp|rfq|solicitation|bond|water main|sewer|street|bridge|park|school|campus|hospital|courthouse|library|fire station|mixed.use|affordable|rezoning|subdivision|permit|master plan)\b/i.test(trimmed)) {
+        chunks.push(trimmed);
+      }
+    }
+  }
+
+  // If no meaningful chunks found from splitting, treat entire email as one chunk
+  if (chunks.length === 0) {
+    chunks.push(fullText.slice(0, 10000));
+  }
+
+  // Step 2: Generate a highlight lead for each chunk
+  const highlights = [];
+  for (const chunk of chunks.slice(0, 5)) { // Cap at 5 highlights per email
+    const chunkLo = chunk.toLowerCase();
+
+    // Skip chunks that are purely boilerplate
+    if (/^(click|view|read more|subscribe|unsubscribe|forward|share|follow us|visit our|copyright|disclaimer)/i.test(chunk.trim())) continue;
+    if (chunk.trim().length < 100) continue;
+
+    // Classification
+    const isRFP = email.scoutLabel === 'rfp' ||
+      /\b(rfq|rfp|invitation\s+to\s+bid|request\s+for\s+(qualifications?|proposals?)|solicitation|bid\s+opportunity)\b/i.test(chunkLo);
+    const isProject = email.scoutLabel === 'projects' ||
+      /\b(tedd|urd|urban\s+renewal|redevelopment|development\s+(project|plan|update)|capital\s+improvement|bond|master\s+plan|mra\s+board|funding\s+reservation|design\s+and\s+engineering|water\s+main|infrastructure)\b/i.test(chunkLo);
+
+    const dashboardLane = isRFP ? 'active_leads' : isProject ? 'development_potentials' : 'news';
+    const leadClass = isRFP ? 'active_solicitation' : 'watch_signal';
+    const status = isRFP ? 'active' : 'watch';
+
+    // Title: normalize from chunk content, not email subject
+    const rawTitle = (chunks.length > 1) ? normalizeHighlightTitle(subject, chunk) : normalizeHighlightTitle(subject, fullText);
+    let title = rawTitle;
+    if (!title || title.length < 5) title = cleanTitle(subject) || subject.slice(0, 120);
+
+    // Budget
+    const budgetMatch = chunk.match(/\$[\d,]+(?:\.\d{1,2})?(?:\s*(?:million|M|k))?\b/i);
+    const potentialBudget = budgetMatch ? budgetMatch[0] : '';
+
+    // Highlight fields
+    const projectPotential = scoreProjectPotential(chunk);
+    const { whyItMatters, whatToWatch } = inferWhyAndWatch(chunk);
+    const highlightSummary = generateHighlightSummary(title, chunk, potentialBudget);
+
+    // Market sector
+    let marketSector = 'Other';
+    if (/\b(school|k-12|mcps)\b/i.test(chunkLo)) marketSector = 'K-12';
+    else if (/\b(university|college|campus)\b/i.test(chunkLo)) marketSector = 'Higher Education';
+    else if (/\b(hospital|clinic|medical)\b/i.test(chunkLo)) marketSector = 'Healthcare';
+    else if (/\b(courthouse|city hall|civic|municipal|council)\b/i.test(chunkLo)) marketSector = 'Civic';
+    else if (/\b(tedd|urd|redevelopment|mixed.?use)\b/i.test(chunkLo)) marketSector = 'Mixed Use';
+    else if (/\b(housing|affordable|residential|apartment|rental)\b/i.test(chunkLo)) marketSector = 'Housing';
+    else if (/\b(infrastructure|water|sewer|utility|street|bridge)\b/i.test(chunkLo)) marketSector = 'Civic';
+    else if (/\b(construction|renovation|building|facility|project)\b/i.test(chunkLo)) marketSector = 'Civic';
+
+    // Relevance scoring
+    let relevanceScore = isRFP ? 60 : (isProject ? 45 : 35);
+    if (bodyText.length > 500) relevanceScore += 5;
+    if ((email.linkedContent || []).length > 0) relevanceScore += 8;
+    if ((email.attachmentContent || []).length > 0) relevanceScore += 5;
+    if (budgetMatch) relevanceScore += 5;
+    if (projectPotential === 'high') relevanceScore += 10;
+    else if (projectPotential === 'medium') relevanceScore += 5;
+    relevanceScore = Math.min(relevanceScore, 90);
+
+    // Enrich-existing check: see if this highlight matches an existing lead
+    let enrichTarget = null;
+    const titleLo = title.toLowerCase().trim();
+    for (const ex of existingLeads) {
+      const exTitleLo = (ex.title || '').toLowerCase().trim();
+      if (titleSimilarity(title, ex.title) >= 0.55 || titleLo.includes(exTitleLo) || exTitleLo.includes(titleLo)) {
+        enrichTarget = ex;
+        break;
+      }
+    }
+
+    const id = `lead-gmail-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const evidenceLinks = (email.links || []).slice(0, 5);
+    const evidenceEntries = [{
+      id: `ev-${id}`,
+      leadId: id,
+      sourceId: src.id || src.source_id || '',
+      sourceName: fromName,
+      url: evidenceLinks[0] || '',
+      title: `Email: ${subject.slice(0, 80)}`,
+      summary: highlightSummary.slice(0, 400),
+      signalDate: emailDate,
+      dateFound: now,
+      signalStrength: projectPotential === 'high' ? 'strong' : 'medium',
+      keywords: [],
+    }];
+    // Evidence from linked content
+    for (const lc of (email.linkedContent || []).slice(0, 2)) {
+      evidenceEntries.push({
+        id: `ev-${id}-lnk-${evidenceEntries.length}`,
+        leadId: id,
+        sourceId: src.id || src.source_id || '',
+        sourceName: lc.title || lc.url,
+        url: lc.url,
+        title: lc.title || `Linked ${lc.type}`,
+        summary: (lc.content || '').slice(0, 300),
+        signalDate: emailDate,
+        dateFound: now,
+        signalStrength: 'medium',
+        keywords: [],
+      });
+    }
+
+    highlights.push({
+      id,
+      title,
+      owner: fromName,
+      projectName: title,
+      location: 'Missoula, MT',
+      county: 'Missoula',
+      marketSector,
+      projectType: isRFP ? 'RFQ/RFP' : 'Other',
+      description: highlightSummary + (potentialBudget ? ` Budget signal: ${potentialBudget}.` : '') + ` — Source: Email (${fromName})`,
+      highlightSummary,
+      projectPotential,
+      whyItMatters,
+      whatToWatch,
+      potentialTimeline: '',
+      potentialBudget,
+      action_due_date: '',
+      relevanceScore,
+      pursuitScore: isRFP ? 40 : 15,
+      sourceConfidenceScore: 75,
+      confidenceNotes: `Email from ${fromName}. Label: Scout/${email.scoutLabel}. ${emailDate}. Potential: ${projectPotential}.`,
+      dateDiscovered: now,
+      originalSignalDate: emailDate,
+      lastCheckedDate: now,
+      status,
+      leadClass,
+      leadOrigin: 'gmail_intake',
+      dashboard_lane: dashboardLane,
+      watchCategory: isRFP ? 'named_project' : isProject ? 'development_program' : 'named_project',
+      projectStatus: isRFP ? 'active_solicitation' : 'future_watch',
+      extractionPath: 'gmail_api_highlights',
+      gmailMessageId: email.id,
+      emailFrom: email.from,
+      emailDate,
+      sourceName: src.name || src.source_name || 'Gmail Intake',
+      sourceUrl: '',
+      sourceId: src.id || src.source_id || '',
+      evidenceLinks,
+      evidenceSourceLinks: [
+        { url: '', label: `Email from ${fromName}`, linkType: 'email' },
+        ...(email.linkedContent || []).slice(0, 2).map(lc => ({ url: lc.url, label: lc.title || lc.url, linkType: lc.type })),
+      ],
+      evidenceSummary: highlightSummary.slice(0, 500),
+      matchedFocusPoints: [],
+      matchedKeywords: [],
+      matchedTargetOrgs: [],
+      taxonomyMatches: [],
+      internalContact: '',
+      notes: '',
+      evidence: evidenceEntries,
+      // Enrichment metadata
+      _enrichTarget: enrichTarget ? enrichTarget.id : null,
+    });
+  }
+
+  return highlights;
+}
+
 // ── v4-b6: News relevance filter ─────────────────────────────
 // News leads must contain actual development/building/project intelligence.
 // Generic civic, crime, weather, sports, lifestyle, dining, opinion, and
@@ -5617,40 +5930,69 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // v4-b24: Gmail intake sources use Gmail API
+      // v4-b25: Gmail intake — multi-highlight extraction with enrichment
       if (earlyProfile.profile_type === 'gmail_intake') {
         const gmailResult = await fetchGmailMessages(src, log);
         if (gmailResult.unconfigured) {
           sourceHealthMap.push({ sourceId: src.id, status: 'unconfigured', error: 'Gmail credentials not configured' });
-          continue; // graceful skip — no error, no failure count
+          continue;
         }
         sourceHealthMap.push({ sourceId: src.id, status: gmailResult.ok ? 'healthy' : 'failing', error: gmailResult.err || null });
         if (gmailResult.ok) {
           fetchOk++;
           if (gmailResult.messages.length > 0) parseHits++;
-          let gmailAdded = 0;
+          let gmailAdded = 0, gmailEnriched = 0;
           for (const email of gmailResult.messages) {
-            const lead = extractLeadFromEmail(email, src);
-            if (!lead) continue;
-            // Dedup by Gmail message ID
-            const gmailDupe = added.some(a => a.gmailMessageId === email.id) ||
-              (existingLeads || []).some(ex => ex.gmailMessageId === email.id);
-            if (gmailDupe) { skipDupe++; continue; }
-            // Dedup by title
-            const tl = lead.title.toLowerCase().trim();
-            if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
-            const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
-            if (isDupe) { skipDupe++; continue; }
-            // Title quality gates
-            if (isGenericNewsHeadline(lead.title)) { skipGenericTitle++; continue; }
-            if (isRetrospectiveTitle(lead.title)) { skipNotProjectSpecific++; continue; }
-            exSet.add(tl);
-            addedTitles.push(lead.title);
-            added.push(lead);
-            gmailAdded++;
-            log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}" | label=${email.scoutLabel} | lane=${lead.dashboard_lane} | from=${(email.from||'').slice(0,30)}`);
+            // Extract multiple highlights from each email
+            const highlights = extractHighlightsFromEmail(email, src, existingLeads || []);
+            if (highlights.length === 0) {
+              // Fallback to single-lead extraction for simple emails
+              const lead = extractLeadFromEmail(email, src);
+              if (lead) highlights.push(lead);
+            }
+            for (const lead of highlights) {
+              // Dedup by Gmail message ID + title (allow multiple highlights from same message)
+              const gmailTitleKey = `${email.id}:${lead.title}`;
+              const gmailDupe = added.some(a => a.gmailMessageId === email.id && titleSimilarity(a.title, lead.title) >= 0.65) ||
+                (existingLeads || []).some(ex => ex.gmailMessageId === email.id && titleSimilarity(ex.title, lead.title) >= 0.65);
+              if (gmailDupe) { skipDupe++; continue; }
+
+              // Enrich-existing if a match was found
+              if (lead._enrichTarget) {
+                const ex = (existingLeads || []).find(l => l.id === lead._enrichTarget);
+                if (ex) {
+                  updated.push({
+                    leadId: ex.id,
+                    lastCheckedDate: now,
+                    lastUpdatedDate: now,
+                    relevanceScore: Math.min(90, (ex.relevanceScore || 50) + 5),
+                    newEvidence: lead.evidence?.[0] || null,
+                    highlightSummary: lead.highlightSummary,
+                    projectPotential: lead.projectPotential,
+                    whyItMatters: lead.whyItMatters,
+                    whatToWatch: lead.whatToWatch,
+                  });
+                  gmailEnriched++;
+                  log(`    ↻ enriched existing "${ex.title?.slice(0,50)}" with "${lead.title?.slice(0,50)}" | potential=${lead.projectPotential}`);
+                  continue;
+                }
+              }
+              delete lead._enrichTarget;
+
+              // Standard dedup by title
+              const tl = lead.title.toLowerCase().trim();
+              if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
+              const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
+              if (isDupe) { skipDupe++; continue; }
+
+              exSet.add(tl);
+              addedTitles.push(lead.title);
+              added.push(lead);
+              gmailAdded++;
+              log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}" | ${lead.projectPotential || '?'} potential | lane=${lead.dashboard_lane} | from=${(email.from||'').slice(0,30)}`);
+            }
           }
-          log(`  → ${gmailAdded} email lead(s) added (${gmailResult.messages.length} messages fetched)`);
+          log(`  → ${gmailAdded} highlight(s) added, ${gmailEnriched} enriched (${gmailResult.messages.length} messages)`);
         } else {
           fetchFail++;
         }
@@ -6125,6 +6467,25 @@ export default async function handler(req, res) {
         log(`    ✚ [${c.status}] "${c.title.slice(0,60)}" | pStatus=${c.projectStatus||'?'} | wCat=${c.watchCategory||'?'} | lane=${c.dashboard_lane||'active_leads'} | path=${c.extractionPath||'pattern'} | src=${src.id||src.name}`);
       }
       if (added.length >= (action === 'daily' ? 10 : 40)) { log('  — lead cap reached'); break; }
+    }
+
+    // v4-b25: Post-process all added leads with highlight fields (news + project intelligence)
+    for (const lead of added) {
+      if (!lead.projectPotential) {
+        const combined = `${lead.title || ''} ${lead.description || ''} ${lead.whyItMatters || ''}`;
+        lead.projectPotential = scoreProjectPotential(combined);
+      }
+      if (!lead.whyItMatters || lead.whyItMatters.length < 10) {
+        const combined = `${lead.title || ''} ${lead.description || ''}`;
+        const signals = inferWhyAndWatch(combined);
+        if (!lead.whyItMatters || lead.whyItMatters.length < 10) lead.whyItMatters = signals.whyItMatters;
+        if (!lead.whatToWatch) lead.whatToWatch = signals.whatToWatch;
+      }
+      if (!lead.highlightSummary && lead.description) {
+        // Generate a brief highlight from the description (first 2-3 meaningful sentences)
+        const sentences = (lead.description || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/).filter(s => s.length > 20 && s.length < 300);
+        lead.highlightSummary = sentences.slice(0, 3).join(' ').slice(0, 350);
+      }
     }
 
     const dur = Date.now() - start;
