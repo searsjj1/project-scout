@@ -8247,32 +8247,22 @@ export default function ProjectScout() {
           </p>
         </div>
 
-        {/* v4-b27: News tab — principal BD intelligence brief */}
+        {/* v4-b28: News tab — BD continuity + semantic linking */}
         {activeTab === 'news' && (() => {
-          // ── Gather all news-lane + project-lane leads ──
+          // ── Gather leads ──
           const allNews = leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l));
           const allProjects = leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l));
           const allItems = [...allNews, ...allProjects];
 
-          // ── Date helpers ──
           const now = Date.now();
           const DAY = 86400000;
-          const getItemDate = (l) => {
-            const d = l.originalSignalDate || l.emailDate || l.dateDiscovered || l.dateAdded || l.lastCheckedDate;
-            return d ? new Date(d).getTime() : 0;
-          };
+          const getItemDate = (l) => { const d = l.originalSignalDate || l.emailDate || l.dateDiscovered || l.dateAdded || l.lastCheckedDate; return d ? new Date(d).getTime() : 0; };
           const within7d = allItems.filter(l => (now - getItemDate(l)) <= 7 * DAY);
           const within30d = allItems.filter(l => (now - getItemDate(l)) <= 30 * DAY);
 
-          // ── Sort helper ──
           const potentialOrder = { high: 0, medium: 1, low: 2 };
-          const sortItems = (arr) => [...arr].sort((a, b) => {
-            const pa = potentialOrder[a.projectPotential] ?? 2;
-            const pb = potentialOrder[b.projectPotential] ?? 2;
-            return pa !== pb ? pa - pb : (b.relevanceScore || 0) - (a.relevanceScore || 0);
-          });
+          const sortItems = (arr) => [...arr].sort((a, b) => { const pa = potentialOrder[a.projectPotential] ?? 2; const pb = potentialOrder[b.projectPotential] ?? 2; return pa !== pb ? pa - pb : (b.relevanceScore || 0) - (a.relevanceScore || 0); });
 
-          // ── Project-relevant filter ──
           const isProjectRelevant = (l) => {
             if (l.projectPotential === 'high' || l.projectPotential === 'medium') return true;
             const txt = `${l.title || ''} ${l.whyItMatters || ''} ${l.highlightSummary || ''} ${l.description || ''}`.toLowerCase();
@@ -8280,21 +8270,71 @@ export default function ProjectScout() {
           };
           const projectRelevant30d = sortItems(within30d.filter(isProjectRelevant));
 
-          // ── Cross-tab: match news items to existing Potential Projects ──
-          const crossTabMap = new Map(); // newsLeadId → matchedProjectTitle
+          // ═══ SEMANTIC PROJECT IDENTITY LINKING ═══
+          // Known Missoula project aliases / alternate names / addresses
+          const PROJECT_ALIASES = [
+            { canonical: 'Franklin Crossing', aliases: ['franklin crossing', 'north mrl triangle', '1919 north avenue', 'north avenue west housing', 'mrl triangle'] },
+            { canonical: 'Scott Street Development', aliases: ['scott street', 'nrss', 'north russell scott', 'scott st mixed'] },
+            { canonical: 'Riverfront Triangle', aliases: ['riverfront triangle', 'riverfront triangle urd', 'clark fork riverfront'] },
+            { canonical: 'West Broadway Corridor', aliases: ['west broadway', 'w broadway corridor', 'west broadway master plan'] },
+            { canonical: 'Mullan BUILD', aliases: ['mullan build', 'mullan area', 'mullan road', 'mullan master plan'] },
+            { canonical: 'Southgate Mall Area', aliases: ['southgate mall', 'southgate redevelopment', 'south higgins commercial'] },
+            { canonical: 'Old Sawmill District', aliases: ['old sawmill', 'sawmill district', 'wylie sawmill'] },
+            { canonical: 'Library Block', aliases: ['library block', 'main library', 'missoula public library expansion'] },
+            { canonical: 'Sentinel High HVAC', aliases: ['sentinel high', 'sentinel hvac', 'sentinel school'] },
+            { canonical: 'Missoula Airport Terminal', aliases: ['airport terminal', 'terminal expansion', 'mso terminal', 'airport master plan'] },
+            { canonical: 'Johnson Street Water Main', aliases: ['johnson street', 'johnson st water', 'johnson water main'] },
+          ];
+
+          // Build semantic cross-tab map: newsId → { projectTitle, matchReason }
+          const crossTabMap = new Map();
           for (const ni of allNews) {
+            const niText = `${ni.title || ''} ${ni.description || ''} ${ni.highlightSummary || ''}`.toLowerCase();
+            let matched = false;
+            // Pass 1: Alias-based matching (strongest — known project identities)
+            for (const alias of PROJECT_ALIASES) {
+              const aliasHit = alias.aliases.some(a => niText.includes(a));
+              if (aliasHit) {
+                // Find the corresponding project in Potential Projects
+                const proj = allProjects.find(pj => {
+                  const pjText = `${pj.title || ''} ${pj.description || ''}`.toLowerCase();
+                  return alias.aliases.some(a => pjText.includes(a)) || pjText.includes(alias.canonical.toLowerCase());
+                });
+                if (proj) {
+                  crossTabMap.set(ni.id, { title: proj.title, reason: `Alias: ${alias.canonical}`, canonical: alias.canonical });
+                  matched = true; break;
+                }
+              }
+            }
+            if (matched) continue;
+            // Pass 2: Title overlap (existing approach, improved)
             const niLo = (ni.title || '').toLowerCase();
             for (const pj of allProjects) {
               const pjLo = (pj.title || '').toLowerCase();
-              if (niLo.length > 8 && pjLo.length > 8 && (niLo.includes(pjLo) || pjLo.includes(niLo) ||
-                niLo.split(/\s+/).filter(w => w.length > 4 && pjLo.includes(w)).length >= 2)) {
-                crossTabMap.set(ni.id, pj.title);
-                break;
+              if (niLo.length > 8 && pjLo.length > 8) {
+                if (niLo.includes(pjLo) || pjLo.includes(niLo)) {
+                  crossTabMap.set(ni.id, { title: pj.title, reason: 'Title match' }); matched = true; break;
+                }
+                const overlap = niLo.split(/\s+/).filter(w => w.length > 4 && pjLo.includes(w));
+                if (overlap.length >= 2) {
+                  crossTabMap.set(ni.id, { title: pj.title, reason: `Shared: ${overlap.slice(0,3).join(', ')}` }); matched = true; break;
+                }
+              }
+            }
+            if (matched) continue;
+            // Pass 3: Owner + location overlap
+            const niOwner = (ni.owner || '').toLowerCase();
+            const niLoc = (ni.location || '').toLowerCase();
+            for (const pj of allProjects) {
+              const pjOwner = (pj.owner || '').toLowerCase();
+              const pjText = `${pj.title || ''} ${pj.description || ''}`.toLowerCase();
+              if (niOwner.length > 5 && pjOwner.length > 5 && niOwner === pjOwner && ni.marketSector === pj.marketSector) {
+                crossTabMap.set(ni.id, { title: pj.title, reason: `Owner: ${ni.owner}` }); break;
               }
             }
           }
 
-          // ── Organizational entity extraction ──
+          // ═══ ORG EXTRACTION ═══
           const ORG_PATTERNS = [
             { pat: /\b(city\s+of\s+missoula|city\s+council|missoula\s+city)\b/i, name: 'City of Missoula' },
             { pat: /\b(missoula\s+county(?:\s+commission)?|county\s+commission)\b/i, name: 'Missoula County' },
@@ -8315,117 +8355,112 @@ export default function ProjectScout() {
             const counts = new Map();
             for (const l of items) {
               const txt = `${l.title || ''} ${l.owner || ''} ${l.sourceName || ''} ${l.description || ''} ${l.highlightSummary || ''}`;
-              for (const { pat, name } of ORG_PATTERNS) {
-                if (pat.test(txt)) counts.set(name, (counts.get(name) || 0) + 1);
-              }
+              for (const { pat, name } of ORG_PATTERNS) { if (pat.test(txt)) counts.set(name, (counts.get(name) || 0) + 1); }
             }
             return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
           };
 
-          // ── Narrative summary generator ──
+          // ═══ BRIEF ARCHIVE / CONTINUITY ═══
+          const BRIEF_STORAGE_KEY = 'ps_news_brief_archive';
+          const loadArchive = () => { try { return JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || '[]'); } catch { return []; } };
+          const archive = loadArchive();
+          const priorBrief = archive.length > 0 ? archive[archive.length - 1] : null;
+
+          // Compare current 7d titles to prior brief titles → new / continuing / dropped
+          const current7dTitles = new Set(within7d.map(l => (l.title || '').toLowerCase().trim()));
+          const prior7dTitles = new Set((priorBrief?.titles7d || []).map(t => t.toLowerCase().trim()));
+          const newItems = within7d.filter(l => !prior7dTitles.has((l.title || '').toLowerCase().trim()));
+          const continuingItems = within7d.filter(l => prior7dTitles.has((l.title || '').toLowerCase().trim()));
+          const droppedTitles = [...prior7dTitles].filter(t => !current7dTitles.has(t));
+          const continuityStatus = (lead) => {
+            const tl = (lead.title || '').toLowerCase().trim();
+            if (priorBrief && prior7dTitles.has(tl)) return 'continuing';
+            if (priorBrief && !prior7dTitles.has(tl)) return 'new';
+            return null;
+          };
+
+          // Publish current brief snapshot
+          const publishBrief = () => {
+            const snapshot = {
+              date: new Date().toISOString(),
+              titles7d: within7d.map(l => l.title || ''),
+              titles30d: within30d.map(l => l.title || ''),
+              high: within7d.filter(l => l.projectPotential === 'high').length,
+              med: within7d.filter(l => l.projectPotential === 'medium').length,
+              total7d: within7d.length,
+              total30d: within30d.length,
+              narrative7d: generateNarrative(sortItems(within7d), 'last 7 days'),
+            };
+            const updated = [...archive.slice(-4), snapshot]; // keep last 5
+            try { localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(updated)); } catch {}
+            return updated;
+          };
+
+          // ═══ NARRATIVE + SYNOPSIS ═══
           const generateNarrative = (items, windowLabel) => {
             if (items.length === 0) return '';
             const sorted = sortItems(items);
             const high = sorted.filter(l => l.projectPotential === 'high');
-            const med = sorted.filter(l => l.projectPotential === 'medium');
             const orgs = extractOrgs(items);
             const budgets = sorted.filter(l => l.potentialBudget);
-
             const parts = [];
-
-            // Opening: activity level
-            if (high.length > 0 || med.length > 0) {
-              const signalCount = high.length + med.length;
-              parts.push(`${signalCount} project-relevant signal${signalCount !== 1 ? 's' : ''} in the ${windowLabel.toLowerCase()}.`);
-            } else {
-              parts.push(`${items.length} item${items.length !== 1 ? 's' : ''} scanned in the ${windowLabel.toLowerCase()}, with limited project-specific movement.`);
-            }
-
-            // High-potential highlights (name the projects)
+            const signalCount = high.length + sorted.filter(l => l.projectPotential === 'medium').length;
+            if (signalCount > 0) parts.push(`${signalCount} project-relevant signal${signalCount !== 1 ? 's' : ''} in the ${windowLabel.toLowerCase()}.`);
+            else parts.push(`${items.length} item${items.length !== 1 ? 's' : ''} scanned in the ${windowLabel.toLowerCase()}, with limited project-specific movement.`);
             if (high.length > 0) {
               const names = high.slice(0, 3).map(l => l.title);
-              if (high.length === 1) {
-                parts.push(`Strongest signal: ${names[0]}${high[0].whyItMatters ? ' — ' + high[0].whyItMatters.toLowerCase() : ''}.`);
-              } else {
-                parts.push(`Key opportunities: ${names.join(', ')}${high.length > 3 ? ` and ${high.length - 3} more` : ''}.`);
-              }
+              parts.push(high.length === 1 ? `Strongest signal: ${names[0]}${high[0].whyItMatters ? ' — ' + high[0].whyItMatters.toLowerCase() : ''}.` : `Key opportunities: ${names.join(', ')}${high.length > 3 ? ` and ${high.length - 3} more` : ''}.`);
             }
-
-            // Budget highlights
-            if (budgets.length > 0) {
-              const topBudget = budgets[0];
-              parts.push(`Notable funding: ${topBudget.potentialBudget} for ${topBudget.title}.`);
-            }
-
-            // Active entities
-            if (orgs.length > 0) {
-              const orgNames = orgs.slice(0, 3).map(([name]) => name);
-              parts.push(`Active entities: ${orgNames.join(', ')}.`);
-            }
-
-            // Follow-up signals
+            if (budgets.length > 0) parts.push(`Notable funding: ${budgets[0].potentialBudget} for ${budgets[0].title}.`);
+            if (orgs.length > 0) parts.push(`Active entities: ${orgs.slice(0, 3).map(([n]) => n).join(', ')}.`);
             const watchItems = sorted.filter(l => l.whatToWatch && l.projectPotential !== 'low').slice(0, 2);
-            if (watchItems.length > 0) {
-              const watches = watchItems.map(l => `${l.title} (${l.whatToWatch})`);
-              parts.push(`Follow-up: ${watches.join('; ')}.`);
-            }
-
+            if (watchItems.length > 0) parts.push(`Follow-up: ${watchItems.map(l => `${l.title} (${l.whatToWatch})`).join('; ')}.`);
             return parts.join(' ');
           };
 
-          // ── Executive synopsis builder (enriched) ──
           const buildSynopsis = (items, windowLabel) => {
             if (items.length === 0) return null;
             const sorted = sortItems(items);
             const high = sorted.filter(l => l.projectPotential === 'high');
             const med = sorted.filter(l => l.projectPotential === 'medium');
-
-            // Market-sector themes
             const mThemes = new Map();
             for (const l of sorted) { const ms = l.marketSector || 'Other'; if (ms !== 'Other') mThemes.set(ms, (mThemes.get(ms) || 0) + 1); }
             const topThemes = [...mThemes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k);
-
-            // Org themes
             const orgThemes = extractOrgs(sorted);
-
-            // Budget signals
             const budgets = sorted.filter(l => l.potentialBudget).map(l => ({ title: l.title, budget: l.potentialBudget }));
-
-            // Narrative
             const narrative = generateNarrative(sorted, windowLabel);
-
             return { total: items.length, high: high.length, med: med.length, topThemes, orgThemes, budgets, narrative, topItems: sorted.slice(0, 6) };
           };
 
           const syn7 = buildSynopsis(within7d, 'last 7 days');
           const syn30 = buildSynopsis(within30d, 'last 30 days');
 
-          // ── Shared UI ──
+          // ═══ UI COMPONENTS ═══
           const potentialBadge = (level) => {
             const styles = { high: { bg: '#dcfce7', color: '#166534', border: '#bbf7d0' }, medium: { bg: '#fef3c7', color: '#92400e', border: '#fde68a' }, low: { bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0' } };
             const s = styles[level] || styles.low;
             return <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: s.bg, color: s.color, border: `1px solid ${s.border}`, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{level || 'low'}</span>;
           };
-          const trackedBadge = <span style={{ fontSize: 8.5, fontWeight: 700, padding: '1px 5px', borderRadius: 3, background: '#ede9fe', color: '#7c3aed', border: '1px solid #ddd6fe', whiteSpace: 'nowrap' }}>TRACKED PROJECT</span>;
+          const linkedBadge = (info) => <span title={info.reason} style={{ fontSize: 8.5, fontWeight: 700, padding: '1px 5px', borderRadius: 3, background: '#ede9fe', color: '#7c3aed', border: '1px solid #ddd6fe', whiteSpace: 'nowrap', cursor: 'help' }}>TRACKED</span>;
+          const statusBadgeEl = (st) => {
+            if (st === 'new') return <span style={{ fontSize: 8, fontWeight: 800, padding: '1px 5px', borderRadius: 3, background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd' }}>NEW</span>;
+            if (st === 'continuing') return <span style={{ fontSize: 8, fontWeight: 800, padding: '1px 5px', borderRadius: 3, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}>ONGOING</span>;
+            return null;
+          };
 
-          const SynopsisBlock = ({ syn, label, accent }) => {
+          const SynopsisBlock = ({ syn, label, accent, showContinuity }) => {
             if (!syn) return <div style={{ padding: '16px 0', fontSize: 12, color: '#94a3b8' }}>No items in this period. Run a scan to populate.</div>;
             return (
               <div style={{ padding: '16px 20px', background: '#fff', borderRadius: 10, border: '1px solid #f1f5f9', borderLeft: `3px solid ${accent}` }}>
-                {/* Header row */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 14, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>{label}</span>
                   <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: '#f1f5f9', color: '#64748b' }}>{syn.total} item{syn.total !== 1 ? 's' : ''}</span>
                   {syn.high > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#dcfce7', color: '#166534' }}>{syn.high} HIGH</span>}
                   {syn.med > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>{syn.med} MEDIUM</span>}
+                  {showContinuity && priorBrief && newItems.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af' }}>{newItems.length} NEW</span>}
+                  {showContinuity && priorBrief && continuingItems.length > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534' }}>{continuingItems.length} ONGOING</span>}
                 </div>
-                {/* Written narrative */}
-                {syn.narrative && (
-                  <p style={{ fontSize: 12.5, color: '#334155', lineHeight: 1.65, margin: '0 0 12px', fontStyle: 'normal', letterSpacing: '0.005em' }}>
-                    {syn.narrative}
-                  </p>
-                )}
-                {/* Org + sector themes side by side */}
+                {syn.narrative && <p style={{ fontSize: 12.5, color: '#334155', lineHeight: 1.65, margin: '0 0 12px', letterSpacing: '0.005em' }}>{syn.narrative}</p>}
                 <div style={{ display: 'flex', gap: 20, marginBottom: 10, flexWrap: 'wrap' }}>
                   {syn.orgThemes.length > 0 && (
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -8440,103 +8475,124 @@ export default function ProjectScout() {
                     </div>
                   )}
                 </div>
-                {/* Budget signals */}
                 {syn.budgets.length > 0 && (
                   <div style={{ display: 'flex', gap: 5, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                     <span style={{ fontSize: 9, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '20px' }}>Funding</span>
                     {syn.budgets.slice(0, 3).map((b, i) => <span key={i} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: '#fffbeb', color: '#b45309', fontWeight: 600 }}>{b.budget} — {(b.title || '').slice(0, 40)}</span>)}
                   </div>
                 )}
-                {/* Top items with cross-tab badges */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {syn.topItems.map(l => (
-                    <div key={l.id} onClick={() => handleSelectLead(l)} style={{
-                      display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
-                      background: '#fafbfc', border: '1px solid transparent', transition: 'all 0.12s',
-                    }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#f0f4ff'; e.currentTarget.style.borderColor = '#c7d2fe'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = '#fafbfc'; e.currentTarget.style.borderColor = 'transparent'; }}
-                    >
-                      {potentialBadge(l.projectPotential)}
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanHtmlEntities(l.title)}</span>
-                      {crossTabMap.has(l.id) && trackedBadge}
-                      {l.whyItMatters && <span style={{ fontSize: 10, color: '#64748b', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>{l.whyItMatters}</span>}
-                      <ScoreRing score={l.relevanceScore || 0} size={24} strokeWidth={2} />
+                  {syn.topItems.map(l => {
+                    const xt = crossTabMap.get(l.id);
+                    const cs = showContinuity ? continuityStatus(l) : null;
+                    return (
+                      <div key={l.id} onClick={() => handleSelectLead(l)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px', borderRadius: 6, cursor: 'pointer', background: '#fafbfc', border: '1px solid transparent', transition: 'all 0.12s' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#f0f4ff'; e.currentTarget.style.borderColor = '#c7d2fe'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '#fafbfc'; e.currentTarget.style.borderColor = 'transparent'; }}>
+                        {potentialBadge(l.projectPotential)}
+                        {cs && statusBadgeEl(cs)}
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanHtmlEntities(l.title)}</span>
+                        {xt && linkedBadge(xt)}
+                        {l.whyItMatters && <span style={{ fontSize: 10, color: '#64748b', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>{l.whyItMatters}</span>}
+                        <ScoreRing score={l.relevanceScore || 0} size={24} strokeWidth={2} />
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Dropped items from prior brief */}
+                {showContinuity && droppedTitles.length > 0 && (
+                  <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 6, background: '#fefce8', border: '1px solid #fef9c3' }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: '#a16207', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cooled off since last brief</span>
+                    <div style={{ fontSize: 11, color: '#92400e', marginTop: 3, lineHeight: 1.5 }}>
+                      {droppedTitles.slice(0, 4).map((t, i) => <span key={i}>{i > 0 ? ' · ' : ''}{t.length > 50 ? t.slice(0, 50) + '…' : t}</span>)}
                     </div>
-                  ))}
+                  </div>
+                )}
+              </div>
+            );
+          };
+
+          const NewsCard = ({ lead }) => {
+            const xt = crossTabMap.get(lead.id);
+            const cs = continuityStatus(lead);
+            return (
+              <div onClick={() => handleSelectLead(lead)} style={{ padding: '14px 18px', background: '#fff', borderRadius: 10, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s', borderLeft: lead.projectPotential === 'high' ? '3px solid #22c55e' : lead.projectPotential === 'medium' ? '3px solid #f59e0b' : '3px solid #e2e8f0' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.boxShadow = 'none'; }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{cleanHtmlEntities(lead.title)}</span>
+                      {potentialBadge(lead.projectPotential)}
+                      {cs && statusBadgeEl(cs)}
+                      {xt && linkedBadge(xt)}
+                    </div>
+                  </div>
+                  <ScoreRing score={lead.relevanceScore || 0} size={28} strokeWidth={2.5} />
+                </div>
+                {(lead.highlightSummary || lead.description) && (
+                  <p style={{ fontSize: 11.5, color: '#475569', margin: '0 0 5px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {cleanHtmlEntities(lead.highlightSummary || cleanDescriptionForCard(lead.description)).slice(0, 220)}
+                  </p>
+                )}
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 10.5, lineHeight: 1.4 }}>
+                  {lead.whyItMatters && <div><span style={{ fontWeight: 700, color: '#1d4ed8' }}>Signal: </span><span style={{ color: '#64748b' }}>{lead.whyItMatters}</span></div>}
+                  {lead.whatToWatch && <div><span style={{ fontWeight: 700, color: '#7c3aed' }}>Watch: </span><span style={{ color: '#64748b' }}>{lead.whatToWatch}</span></div>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                  {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8' }}>{lead.sourceName}</span>}
+                  {lead.potentialBudget && <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309' }}>{lead.potentialBudget}</span>}
+                  {lead.marketSector && lead.marketSector !== 'Other' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>{lead.marketSector}</span>}
+                  {xt && <span style={{ fontSize: 9.5, color: '#7c3aed', fontWeight: 600 }} title={xt.reason}>→ {xt.title} <span style={{ fontSize: 8, color: '#a78bfa' }}>({xt.reason})</span></span>}
                 </div>
               </div>
             );
           };
 
-          // ── NewsCard (detail view for project-relevant + all-source sections) ──
-          const NewsCard = ({ lead }) => (
-            <div onClick={() => handleSelectLead(lead)} style={{
-              padding: '14px 18px', background: '#fff', borderRadius: 10, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s',
-              borderLeft: lead.projectPotential === 'high' ? '3px solid #22c55e' : lead.projectPotential === 'medium' ? '3px solid #f59e0b' : '3px solid #e2e8f0',
-            }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = '#93c5fd'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; e.currentTarget.style.boxShadow = 'none'; }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 4 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>{cleanHtmlEntities(lead.title)}</span>
-                    {potentialBadge(lead.projectPotential)}
-                    {crossTabMap.has(lead.id) && trackedBadge}
-                  </div>
-                </div>
-                <ScoreRing score={lead.relevanceScore || 0} size={28} strokeWidth={2.5} />
-              </div>
-              {(lead.highlightSummary || lead.description) && (
-                <p style={{ fontSize: 11.5, color: '#475569', margin: '0 0 5px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {cleanHtmlEntities(lead.highlightSummary || cleanDescriptionForCard(lead.description)).slice(0, 220)}
-                </p>
-              )}
-              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 10.5, lineHeight: 1.4 }}>
-                {lead.whyItMatters && <div><span style={{ fontWeight: 700, color: '#1d4ed8' }}>Signal: </span><span style={{ color: '#64748b' }}>{lead.whyItMatters}</span></div>}
-                {lead.whatToWatch && <div><span style={{ fontWeight: 700, color: '#7c3aed' }}>Watch: </span><span style={{ color: '#64748b' }}>{lead.whatToWatch}</span></div>}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                {lead.sourceName && <span style={{ fontSize: 10, color: '#94a3b8' }}>{lead.sourceName}</span>}
-                {lead.potentialBudget && <span style={{ fontSize: 10, fontWeight: 700, color: '#b45309' }}>{lead.potentialBudget}</span>}
-                {lead.marketSector && lead.marketSector !== 'Other' && <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: '#f1f5f9', color: '#64748b' }}>{lead.marketSector}</span>}
-                {crossTabMap.has(lead.id) && <span style={{ fontSize: 9.5, color: '#7c3aed', fontWeight: 600 }}>→ Also in Potential Projects: {crossTabMap.get(lead.id)}</span>}
-              </div>
-            </div>
-          );
-
           return (
             <div>
-              {/* ── Sub-navigation ── */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 18, borderBottom: '1px solid #f1f5f9', paddingBottom: 8 }}>
+              {/* Sub-navigation */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 18, borderBottom: '1px solid #f1f5f9', paddingBottom: 8, alignItems: 'center' }}>
                 {[
                   { id: 'brief', label: 'Executive Brief' },
                   { id: 'projects', label: 'Project-Relevant', count: projectRelevant30d.length },
                   { id: 'all', label: 'All Source News', count: allNews.length },
                 ].map(s => (
-                  <button key={s.id} onClick={() => setNewsSection(s.id)} style={{
-                    padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                    fontSize: 12, fontWeight: 600,
-                    background: newsSection === s.id ? '#0f172a' : 'transparent',
-                    color: newsSection === s.id ? '#fff' : '#64748b',
-                    transition: 'all 0.12s',
-                  }}>
+                  <button key={s.id} onClick={() => setNewsSection(s.id)} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: newsSection === s.id ? '#0f172a' : 'transparent', color: newsSection === s.id ? '#fff' : '#64748b', transition: 'all 0.12s' }}>
                     {s.label}{s.count !== undefined ? <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 3 }}>{s.count}</span> : null}
                   </button>
                 ))}
+                {/* Publish brief button */}
+                {within7d.length > 0 && (
+                  <button onClick={() => { publishBrief(); alert('Brief snapshot published. Reload the News tab to see continuity comparison.'); }} style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 5, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: 10.5, fontWeight: 600, color: '#64748b' }}>
+                    <Bookmark size={11} style={{ marginRight: 3, verticalAlign: '-1px' }} />Publish Brief
+                  </button>
+                )}
               </div>
 
               {/* ══ SECTION 1: Executive Brief ══ */}
               {newsSection === 'brief' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <SynopsisBlock syn={syn7} label="Last 7 Days" accent="#3b82f6" />
-                  <SynopsisBlock syn={syn30} label="Last 30 Days" accent="#8b5cf6" />
+                  {/* Prior brief indicator */}
+                  {priorBrief && (
+                    <div style={{ padding: '8px 14px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#64748b' }}>
+                      <Bookmark size={12} style={{ color: '#94a3b8' }} />
+                      <span>Last published: <strong style={{ color: '#475569' }}>{new Date(priorBrief.date).toLocaleDateString()}</strong></span>
+                      <span>· {priorBrief.total7d} items · {priorBrief.high || 0} high</span>
+                      <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                        {newItems.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af', fontWeight: 600 }}>{newItems.length} new since then</span>}
+                        {droppedTitles.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#fef9c3', color: '#a16207', fontWeight: 600 }}>{droppedTitles.length} cooled off</span>}
+                        {continuingItems.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534', fontWeight: 600 }}>{continuingItems.length} ongoing</span>}
+                      </span>
+                    </div>
+                  )}
+                  <SynopsisBlock syn={syn7} label="Last 7 Days" accent="#3b82f6" showContinuity={true} />
+                  <SynopsisBlock syn={syn30} label="Last 30 Days" accent="#8b5cf6" showContinuity={false} />
                   {!syn7 && !syn30 && (
                     <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
                       <Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
                       <p style={{ fontSize: 14, fontWeight: 600 }}>No intelligence yet</p>
-                      <p style={{ fontSize: 12 }}>Run a scan to populate the executive brief with Missoula County project intelligence</p>
+                      <p style={{ fontSize: 12 }}>Run a scan to populate the executive brief</p>
                     </div>
                   )}
                 </div>
@@ -8545,19 +8601,11 @@ export default function ProjectScout() {
               {/* ══ SECTION 2: Project-Relevant Updates ══ */}
               {newsSection === 'projects' && (
                 <div>
-                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 14, lineHeight: 1.5 }}>
-                    Items most likely to become A&E opportunities — development, construction, redevelopment, infrastructure, design/engineering, funding, and procurement signals from the last 30 days.
-                  </p>
+                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 14, lineHeight: 1.5 }}>Items most likely to become A&E opportunities — last 30 days.</p>
                   {projectRelevant30d.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      {projectRelevant30d.map(l => <NewsCard key={l.id} lead={l} />)}
-                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{projectRelevant30d.map(l => <NewsCard key={l.id} lead={l} />)}</div>
                   ) : (
-                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
-                      <Target size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
-                      <p style={{ fontSize: 14, fontWeight: 600 }}>No project-relevant updates yet</p>
-                      <p style={{ fontSize: 12 }}>Run a scan to find development and project signals</p>
-                    </div>
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}><Target size={24} style={{ color: '#d1d5db', marginBottom: 8 }} /><p style={{ fontSize: 14, fontWeight: 600 }}>No project-relevant updates yet</p></div>
                   )}
                 </div>
               )}
@@ -8565,19 +8613,11 @@ export default function ProjectScout() {
               {/* ══ SECTION 3: All Source News ══ */}
               {newsSection === 'all' && (
                 <div>
-                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 14, lineHeight: 1.5 }}>
-                    All scanned news items — the complete feed from Missoula County sources.
-                  </p>
+                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 14, lineHeight: 1.5 }}>All scanned news — complete Missoula County feed.</p>
                   {allNews.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {sortItems(allNews).map(l => <NewsCard key={l.id} lead={l} />)}
-                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{sortItems(allNews).map(l => <NewsCard key={l.id} lead={l} />)}</div>
                   ) : (
-                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
-                      <Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
-                      <p style={{ fontSize: 14, fontWeight: 600 }}>No news items yet</p>
-                      <p style={{ fontSize: 12 }}>Run a scan to populate Missoula County news</p>
-                    </div>
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}><Radio size={24} style={{ color: '#d1d5db', marginBottom: 8 }} /><p style={{ fontSize: 14, fontWeight: 600 }}>No news items yet</p></div>
                   )}
                 </div>
               )}
