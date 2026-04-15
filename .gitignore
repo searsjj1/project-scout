@@ -32,3 +32,7 @@ Thumbs.db
 npm-debug.log*
 
 .vercel
+
+# Local Gmail OAuth helper — never commit
+gmail-oauth-client.json
+get-gmail-refresh-token.mjs

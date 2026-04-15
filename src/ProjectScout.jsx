@@ -6700,6 +6700,21 @@ export default function ProjectScout() {
   }, []); // Run once on mount only
 
   const [activeTab, setActiveTab] = useState('rfp');
+  // v4-tabfix: hard-guarantee real-tab behavior. If activeTab somehow ends up
+  // outside the canonical TABS list (e.g. stale 'active' / 'overview' from older
+  // builds), snap it back to 'rfp' so the main panel never renders blank.
+  useEffect(() => {
+    const validIds = ['news', 'rfp', 'projects', 'asana', 'notpursued'];
+    if (!validIds.includes(activeTab)) {
+      setActiveTab('rfp');
+      return;
+    }
+    // Reset scroll on tab switch so each tab feels like a real, exclusive view
+    // rather than a continuation of the previous tab's scroll position.
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [activeTab]);
   const [selectedLead, setSelectedLead] = useState(null);
   // Admin panel toggle (Source Registry, Taxonomy, Settings)
   const [showAdmin, setShowAdmin] = useState(false);
@@ -6729,7 +6744,8 @@ export default function ProjectScout() {
     };
     setLeads(prev => [newLead, ...prev]);
     setShowAddLead(false);
-    setActiveTab('active');
+    // v4-tabfix: route to a real tab id (the legacy 'active' tab no longer exists)
+    setActiveTab('rfp');
   }, []);
 
   const updateLead = useCallback((updatedLead) => {
@@ -8097,9 +8113,12 @@ export default function ProjectScout() {
             </div>
           </div>
 
-          <nav style={{ display: 'flex', gap: 2, height: '100%' }}>
+          <nav role="tablist" aria-label="Project Scout sections" style={{ display: 'flex', gap: 2, height: '100%' }}>
             {TABS.map(tab => (
-              <button key={tab.id} onClick={() => { setActiveTab(tab.id); setSelectedLead(null); }}
+              <button key={tab.id} id={`tab-${tab.id}`} role="tab"
+                aria-selected={activeTab === tab.id}
+                aria-controls={`tabpanel-${tab.id}`}
+                onClick={() => { setActiveTab(tab.id); setSelectedLead(null); }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px', height: '100%',
                   background: 'none', border: 'none', cursor: 'pointer',
@@ -8116,7 +8135,7 @@ export default function ProjectScout() {
                     {activeCounts[tab.id]}
                   </span>
                 )}
-                {tab.id === 'active' && pruningReviewQueue.length > 0 && (
+                {tab.id === 'rfp' && pruningReviewQueue.length > 0 && (
                   <span onClick={(e) => { e.stopPropagation(); setPruneReviewVisible(true); }}
                     style={{ fontSize: 8, fontWeight: 700, padding: '2px 5px', borderRadius: 8, background: '#f59e0b', color: '#fff', marginLeft: 2, cursor: 'pointer' }}
                     title={`${pruningReviewQueue.length} lead(s) need pruning review`}>
@@ -8178,6 +8197,17 @@ export default function ProjectScout() {
           </div>
         )}
 
+        {/* v4-tabfix: One real tabpanel at a time. The `key={activeTab}` forces
+            React to fully unmount the previous panel and mount a fresh one on
+            every tab switch — this is the hard guarantee that no two top-level
+            tab views are ever rendered together, and it kills any stale
+            sub-state from the previously-shown tab. */}
+        <section
+          key={activeTab}
+          role="tabpanel"
+          id={`tabpanel-${activeTab}`}
+          aria-labelledby={`tab-${activeTab}`}
+        >
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.04em', lineHeight: 1.2 }}>
             {TABS.find(t => t.id === activeTab)?.label || 'Project Scout'}
@@ -8343,6 +8373,7 @@ export default function ProjectScout() {
         {activeTab === 'asana' && <SubmittedTab leads={submittedLeads} onSelectLead={handleSelectLead} onImport={() => setShowAsanaImport(true)} />}
         {activeTab === 'notpursued' && <NotPursuedTab leads={notPursuedLeads} submittedLeads={submittedLeads} onSelectLead={handleSelectLead} onRestore={restoreFromNotPursued} />}
         {/* Admin tabs moved to collapsible admin panel above */}
+        </section>
       </main>
 
       {/* v4-b12: Batch triage floating action bar */}
