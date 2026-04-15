@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { Search, ChevronRight, ChevronDown, ExternalLink, MapPin, Building2, Calendar, DollarSign, TrendingUp, Activity, Clock, AlertCircle, AlertTriangle, CheckCircle2, XCircle, Eye, EyeOff, Radio, Settings as SettingsIcon, Layers, Send, Archive, Filter, ArrowUpRight, X, BarChart3, Globe, Bookmark, Zap, RefreshCw, Plus, Minus, ChevronLeft, Database, Target, BookOpen, Wifi, WifiOff, Star, Pause, Play, Trash2, Edit3, TestTube, Copy, Save, RotateCcw, Power, Link2, Hash, FileText, Users, Crosshair, UserPlus, ClipboardCheck, MessageSquare, ArrowRight, Shield, Flag, Download, Upload, HardDrive } from "lucide-react";
+import { Search, ChevronRight, ChevronDown, ExternalLink, MapPin, Building2, Calendar, DollarSign, TrendingUp, Activity, Clock, AlertCircle, AlertTriangle, CheckCircle2, XCircle, Eye, EyeOff, Radio, Settings as SettingsIcon, Layers, Send, Archive, Filter, ArrowUpRight, X, BarChart3, Globe, Bookmark, Zap, RefreshCw, Plus, Minus, ChevronLeft, Database, Target, BookOpen, Wifi, WifiOff, Star, Pause, Play, Trash2, Edit3, TestTube, Copy, Save, RotateCcw, Power, Link2, Hash, FileText, Users, Crosshair, UserPlus, ClipboardCheck, MessageSquare, ArrowRight, Shield, Flag, Download, Upload, HardDrive, Mail } from "lucide-react";
 
 // Phase 2 data foundation
 import { runMigration } from './data/migration.js';
@@ -4704,6 +4704,30 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, onApplyValidation, allLe
               Configure a Backend Endpoint above to enable Asana sync. The Asana access token is managed as an environment variable on the backend. Sync imports all board tasks and checks for Scout lead matches.
             </div>
           )}
+          {/* v4-gmailproof: Gmail Pipeline Test */}
+          <div style={{ marginTop: 10, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+            <button onClick={async () => {
+              if (!hasBackend) return;
+              setEngineState('running'); setEngineAction('gmail-test'); setEngineLog(['Running Gmail diagnostic test...']);
+              try {
+                const resp = await fetch(`${settings.backendEndpoint}/api/scan?action=gmail-test`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({}),
+                });
+                const data = await resp.json();
+                if (data.logs) data.logs.forEach(l => setEngineLog(prev => [...prev, l]));
+                setEngineResults(data.diagnosis ? { mode: 'gmail-test', gmailDiagnosis: data.diagnosis } : null);
+                setEngineState('complete');
+              } catch (e) {
+                setEngineLog(prev => [...prev, `✗ Gmail test error: ${e.message}`]);
+                setEngineState('error');
+              }
+            }} disabled={!hasBackend || engineState === 'running'}
+              style={{ padding:'7px 16px', borderRadius:7, border:'1px solid #e2e8f0', background: hasBackend ? '#fff' : '#e2e8f0', color: hasBackend ? '#475569' : '#94a3b8', cursor: hasBackend && engineState !== 'running' ? 'pointer' : 'not-allowed', fontSize:12, fontWeight:600, display:'flex', alignItems:'center', gap:5 }}>
+              <Mail size={12}/> Test Gmail Pipeline
+            </button>
+            <span style={{ fontSize:10.5, color:'#94a3b8' }}>Tests OAuth auth, lists labels, checks for Scout-labeled messages</span>
+          </div>
           {/* v31c: Asana Diagnostics — section names, BP status */}
           {lastAsanaCheck && lastAsanaCheck.sectionsSeen && (
             <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>

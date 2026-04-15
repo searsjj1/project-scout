@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.20-20260330-gmailintake-b24';
+const SCAN_BUILD_ID = 'scan-v4.21-20260415-gmail-proof-source-reset-b25';
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -4477,6 +4477,136 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ ok: f.ok, fetch: { status:f.status, title:f.title, length:f.length, lastMod:f.lastMod, error:f.err },
         keywords: kw, leads, logs, ts: new Date().toISOString() });
+    }
+
+    // ── GMAIL-TEST — diagnostic endpoint to verify Gmail pipeline ─────
+    if (action === 'gmail-test') {
+      log('═══ GMAIL DIAGNOSTIC TEST ═══');
+      const token = await getGmailAccessToken();
+      if (!token) {
+        log('✗ Gmail auth FAILED — could not obtain access token');
+        log('  Check GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN env vars');
+        return res.status(200).json({
+          ok: false, error: 'Gmail auth failed — no access token obtained',
+          diagnosis: {
+            hasClientId: !!process.env.GMAIL_CLIENT_ID,
+            hasClientSecret: !!process.env.GMAIL_CLIENT_SECRET,
+            hasRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN,
+          },
+          logs, ts: new Date().toISOString(),
+        });
+      }
+      log('✓ Gmail auth SUCCESS — access token obtained');
+
+      // 1. List all labels to check if "Scout" exists
+      let labels = [];
+      try {
+        const labelsResp = await fetch(`${GMAIL_API_BASE}/labels`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (labelsResp.ok) {
+          const labelsData = await labelsResp.json();
+          labels = (labelsData.labels || []).map(l => ({ id: l.id, name: l.name, type: l.type }));
+          const scoutLabels = labels.filter(l => /scout/i.test(l.name));
+          log(`✓ Found ${labels.length} total labels`);
+          if (scoutLabels.length > 0) {
+            log(`✓ Scout labels found: ${scoutLabels.map(l => l.name).join(', ')}`);
+          } else {
+            log('⚠ No "Scout" label found — create labels "Scout", "Scout/News", "Scout/RFP", "Scout/Projects" in Gmail');
+          }
+        } else {
+          log(`✗ Labels API returned HTTP ${labelsResp.status}`);
+        }
+      } catch (e) { log(`✗ Labels fetch error: ${e.message}`); }
+
+      // 2. Run the current Scout query
+      const scoutQuery = 'label:Scout newer_than:7d';
+      let scoutResults = 0;
+      try {
+        const scoutResp = await fetch(`${GMAIL_API_BASE}/messages?q=${encodeURIComponent(scoutQuery)}&maxResults=5`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (scoutResp.ok) {
+          const scoutData = await scoutResp.json();
+          scoutResults = (scoutData.messages || []).length;
+          log(`Scout query "${scoutQuery}": ${scoutResults} messages (estimate: ${scoutData.resultSizeEstimate || 0})`);
+        }
+      } catch (e) { log(`✗ Scout query error: ${e.message}`); }
+
+      // 3. Run a broader query to see if ANY recent messages exist
+      const broadQuery = 'newer_than:14d';
+      let broadResults = 0;
+      let sampleSubjects = [];
+      try {
+        const broadResp = await fetch(`${GMAIL_API_BASE}/messages?q=${encodeURIComponent(broadQuery)}&maxResults=5`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (broadResp.ok) {
+          const broadData = await broadResp.json();
+          broadResults = broadData.resultSizeEstimate || (broadData.messages || []).length;
+          log(`Broad query "${broadQuery}": ~${broadResults} messages`);
+          // Fetch subjects of first few
+          for (const m of (broadData.messages || []).slice(0, 5)) {
+            try {
+              const mResp = await fetch(`${GMAIL_API_BASE}/messages/${m.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (mResp.ok) {
+                const mData = await mResp.json();
+                const hdrs = mData.payload?.headers || [];
+                const subj = hdrs.find(h => h.name === 'Subject')?.value || '(no subject)';
+                const from = hdrs.find(h => h.name === 'From')?.value || '';
+                const labelNames = (mData.labelIds || []).join(', ');
+                sampleSubjects.push({ subject: subj.slice(0, 120), from: from.slice(0, 80), labels: labelNames });
+                log(`  → "${subj.slice(0, 80)}" from ${from.slice(0, 50)} [${labelNames}]`);
+              }
+            } catch {}
+          }
+        }
+      } catch (e) { log(`✗ Broad query error: ${e.message}`); }
+
+      // 4. Pipeline depth assessment
+      log('');
+      log('── Gmail Pipeline Depth Assessment ──');
+      log('✓ Auth: working (OAuth2 refresh → access token)');
+      log('✓ Query: label:Scout newer_than:7d');
+      log(`${scoutResults > 0 ? '✓' : '⚠'} Messages: ${scoutResults} matching Scout query`);
+      log('⚠ Fetch format: metadata only (Subject, From, Date, snippet)');
+      log('✗ Full body parsing: NOT implemented — only snippet (~100 chars) is read');
+      log('✗ Link following: NOT implemented — URLs in evidenceLinks are stored but never fetched');
+      log('✗ Attachment handling: NOT implemented — no code to detect or download attachments');
+      log('');
+      if (scoutResults === 0 && broadResults > 0) {
+        log('DIAGNOSIS: Auth works, mailbox has messages, but none have the "Scout" label.');
+        log('ACTION: In Gmail, create a label called "Scout" and sub-labels Scout/News, Scout/RFP, Scout/Projects.');
+        log('Then label at least one test email with "Scout" and re-run.');
+      } else if (scoutResults === 0 && broadResults === 0) {
+        log('DIAGNOSIS: Auth works but the mailbox appears empty (no messages in last 14 days).');
+        log('ACTION: Send a test email to the Scout Gmail account, label it "Scout", then re-run.');
+      } else {
+        log('DIAGNOSIS: Gmail pipeline is receiving messages. Check scan logs for lead extraction output.');
+      }
+
+      return res.status(200).json({
+        ok: true,
+        diagnosis: {
+          authWorking: true,
+          totalLabels: labels.length,
+          scoutLabelsFound: labels.filter(l => /scout/i.test(l.name)).map(l => l.name),
+          scoutQueryResults: scoutResults,
+          broadQueryResults: broadResults,
+          sampleMessages: sampleSubjects,
+          pipelineDepth: {
+            auth: 'working',
+            messageQuery: 'working',
+            messageFetch: 'metadata_only (Subject, From, Date, snippet)',
+            bodyParsing: 'NOT_IMPLEMENTED',
+            linkFollowing: 'NOT_IMPLEMENTED',
+            attachmentHandling: 'NOT_IMPLEMENTED',
+          },
+        },
+        logs, ts: new Date().toISOString(),
+      });
     }
 
     // ── ASANA IMPORT — fetch all tasks for import panel ─────
