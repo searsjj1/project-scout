@@ -1836,42 +1836,54 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
 
         {activeTab === 'evidence' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* v4-b32: Structured Evidence — extracted facts first, then source links */}
+            {/* v4-b34: Structured Evidence — backend facts with client fallback */}
 
             {/* ── Extracted Facts Panel ── */}
             {(() => {
-              const txt = `${lead.title || ''} ${lead.description || ''} ${lead.highlightSummary || ''} ${lead.evidenceSummary || ''} ${lead.whyItMatters || ''}`;
-              const facts = [];
-              // Scope clues
-              const scopeMatch = txt.match(/\b(\d+[\s,]*(?:unit|bed|room|seat|square\s*f(?:oo|ee)t|sf|gsf|acre|lot|parcel|story|stories|phase|building|structure|site)s?)\b/i);
-              if (scopeMatch) facts.push({ label: 'Scope', value: scopeMatch[0].trim(), icon: '📐' });
-              // Funding/budget
-              if (lead.potentialBudget) facts.push({ label: 'Funding', value: lead.potentialBudget, icon: '💰' });
-              else { const bm = txt.match(/\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|k|billion|B))?\b/); if (bm) facts.push({ label: 'Funding signal', value: bm[0], icon: '💰' }); }
-              // Due date / timing
-              if (lead.action_due_date) facts.push({ label: 'Due date', value: lead.action_due_date, icon: '📅' });
-              const timeMatch = txt.match(/\b(Q[1-4]\s*20\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20\d{2}|(?:spring|summer|fall|winter)\s+20\d{2}|FY\s*20\d{2})/i);
-              if (timeMatch && !lead.action_due_date) facts.push({ label: 'Timing signal', value: timeMatch[0], icon: '📅' });
-              // Approval / authorization
-              if (/\b(approved|authorized|adopted|passed|granted|awarded|funded)\b/i.test(txt)) facts.push({ label: 'Status', value: txt.match(/\b(approved|authorized|adopted|passed|granted|awarded|funded)\b/i)[0] + ' — confirmed by source', icon: '✅' });
-              // Design / engineering
-              if (/\b(design\s+(?:and\s+)?engineering|architectural services|a\/e\s+services|consultant selection|design services)\b/i.test(txt)) facts.push({ label: 'A&E signal', value: 'Design/engineering services indicated', icon: '✏️' });
-              // Procurement
-              if (/\b(rfq|rfp|solicitation|invitation to bid|request for)\b/i.test(txt)) facts.push({ label: 'Procurement', value: 'Active or anticipated solicitation', icon: '📋' });
-              // Owner / entity
-              if (lead.owner && lead.owner !== 'Email' && lead.owner.length > 3) facts.push({ label: 'Owner', value: lead.owner, icon: '🏛️' });
-              // Project stage
-              const ps = inferProjectStage(lead);
-              if (ps.stage !== 'Unknown') facts.push({ label: 'Stage', value: ps.stage, icon: ps.icon });
+              const FACT_ICONS = { budget: '💰', scope: '📐', due_date: '📅', timing: '📅', status: '✅', ae_signal: '✏️', procurement: '📋', owner: '🏛️', stage: '🔍', location: '📍', address: '📍' };
+              const FACT_LABELS = { budget: 'Funding', scope: 'Scope', due_date: 'Due Date', timing: 'Timing', status: 'Status', ae_signal: 'A&E Signal', procurement: 'Procurement', owner: 'Owner / Entity', stage: 'Project Stage', location: 'Location', address: 'Address' };
+
+              // Prefer backend-extracted facts (evidenceFacts array), fall back to client-side extraction
+              let facts = lead.evidenceFacts;
+              const hasBackendFacts = Array.isArray(facts) && facts.length > 0;
+
+              if (!hasBackendFacts) {
+                // Client-side fallback for older leads without backend facts
+                facts = [];
+                const txt = `${lead.title || ''} ${lead.description || ''} ${lead.highlightSummary || ''} ${lead.evidenceSummary || ''} ${lead.whyItMatters || ''}`;
+                const sm = txt.match(/\b(\d+[\s,]*(?:unit|bed|room|seat|square\s*f(?:oo|ee)t|sf|gsf|acre|lot|parcel|story|stories)s?)\b/i);
+                if (sm) facts.push({ type: 'scope', value: sm[0].trim() });
+                if (lead.potentialBudget) facts.push({ type: 'budget', value: lead.potentialBudget, confidence: 'source_verified' });
+                if (lead.action_due_date) facts.push({ type: 'due_date', value: lead.action_due_date });
+                const ps = inferProjectStage(lead);
+                if (ps.stage !== 'Unknown') facts.push({ type: 'stage', value: ps.stage });
+                if (lead.owner && lead.owner !== 'Email' && lead.owner.length > 3) facts.push({ type: 'owner', value: lead.owner });
+              }
 
               return facts.length > 0 ? (
                 <div style={{ padding: '12px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Extracted Facts</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Extracted Facts</span>
+                    {hasBackendFacts && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0', fontWeight: 600 }}>BACKEND</span>}
+                    {!hasBackendFacts && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: '#f1f5f9', color: '#94a3b8', fontWeight: 600 }}>CLIENT</span>}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {facts.map((f, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11.5, lineHeight: 1.4 }}>
-                        <span style={{ flexShrink: 0 }}>{f.icon}</span>
-                        <div><span style={{ fontWeight: 700, color: '#166534' }}>{f.label}: </span><span style={{ color: '#334155' }}>{f.value}</span></div>
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11.5, lineHeight: 1.4, padding: '4px 8px', borderRadius: 6, background: f.confidence === 'source_verified' ? '#ecfdf5' : '#fafffe' }}>
+                        <span style={{ flexShrink: 0, fontSize: 13 }}>{FACT_ICONS[f.type] || '📌'}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div><span style={{ fontWeight: 700, color: '#166534' }}>{FACT_LABELS[f.type] || f.type}: </span><span style={{ color: '#0f172a', fontWeight: 600 }}>{f.value}</span></div>
+                          {f.excerpt && <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2, fontStyle: 'italic', lineHeight: 1.4 }}>"{f.excerpt.slice(0, 150)}"</div>}
+                          {f.sourceLabel && hasBackendFacts && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                              {f.confidence === 'source_verified' && <span style={{ fontSize: 8, padding: '0 4px', borderRadius: 3, background: '#dcfce7', color: '#166534', fontWeight: 700 }}>VERIFIED</span>}
+                              <span style={{ fontSize: 9.5, color: '#94a3b8' }}>
+                                Source: {f.sourceUrl ? <a href={f.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#64748b', textDecoration: 'underline' }}>{f.sourceLabel}</a> : f.sourceLabel}
+                                {f.sourceType && ` (${f.sourceType})`}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.28-20260416-cleanup-evidence-b33';
+const SCAN_BUILD_ID = 'scan-v4.29-20260416-structured-evidence-b34';
 
 // ── v4-b29: Server-side weekly brief publish (to Upstash Redis) ─────
 // Computes a weekly brief snapshot from the scan's lead corpus and stores it
@@ -1083,6 +1083,118 @@ function scoreProjectPotential(text) {
   if (HIGH_POTENTIAL_SIGNALS.test(text)) return 'high';
   if (MEDIUM_POTENTIAL_SIGNALS.test(text)) return 'medium';
   return 'low';
+}
+
+/**
+ * v4-b33: Extract structured evidence facts from lead content.
+ * Returns an array of { type, value, confidence, sourceUrl, sourceLabel, sourceType, excerpt }.
+ * Conservative: only extracts facts clearly supported by text. Honest blanks preferred over false certainty.
+ */
+function extractEvidenceFacts(lead) {
+  const facts = [];
+  const title = lead.title || '';
+  const desc = lead.description || '';
+  const summary = lead.highlightSummary || lead.evidenceSummary || '';
+  const combined = `${title} ${desc} ${summary} ${lead.whyItMatters || ''}`;
+  const lo = combined.toLowerCase();
+
+  // Determine primary source artifact for attribution
+  const primaryUrl = lead.evidenceLinks?.[0] || lead.sourceUrl || '';
+  const primaryLabel = lead.sourceName || 'Source';
+  const primaryType = lead.extractionPath === 'gmail_api_highlights' || lead.extractionPath === 'gmail_api_full' ? 'email'
+    : /\.pdf/i.test(primaryUrl) ? 'pdf' : lead.leadOrigin === 'public_notice' ? 'public_notice' : 'html';
+
+  const addFact = (type, value, excerpt, confidence = 'extracted') => {
+    if (!value) return;
+    facts.push({ type, value, confidence, sourceUrl: primaryUrl, sourceLabel: primaryLabel, sourceType: primaryType, excerpt: (excerpt || '').slice(0, 200) });
+  };
+
+  // ── Budget / funding ──
+  const budgetPatterns = [
+    /\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|billion|B|k))?\s+(?:for|to|toward|requested|allocated|approved|budgeted|reserved|funded)\s+([^.;]{5,80})/i,
+    /(?:budget|funding|cost|allocation|reservation)\s+(?:of\s+)?\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|k))?/i,
+  ];
+  if (lead.potentialBudget) {
+    const excerpt = combined.match(new RegExp(lead.potentialBudget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^.;]{0,80}', 'i'));
+    addFact('budget', lead.potentialBudget, excerpt ? excerpt[0] : '', 'source_verified');
+  } else {
+    for (const pat of budgetPatterns) {
+      const m = combined.match(pat);
+      if (m) { addFact('budget', m[0].slice(0, 80).trim(), m[0], 'extracted'); break; }
+    }
+  }
+
+  // ── Scope ──
+  const scopeMatch = combined.match(/\b(\d[\d,]*\s*(?:unit|bed|room|seat|square\s*f(?:oo|ee)t|sf|gsf|acre|lot|parcel|stor(?:y|ies)|phase|building|structure|site)s?)\b/i);
+  if (scopeMatch) {
+    const ctx = combined.slice(Math.max(0, combined.indexOf(scopeMatch[0]) - 30), combined.indexOf(scopeMatch[0]) + scopeMatch[0].length + 50);
+    addFact('scope', scopeMatch[0].trim(), ctx.trim());
+  }
+
+  // ── Due date / timing ──
+  if (lead.action_due_date) addFact('due_date', lead.action_due_date, '', 'source_verified');
+  const timeMatch = combined.match(/\b(Q[1-4]\s*20\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s*20\d{2}|(?:spring|summer|fall|winter)\s+20\d{2}|FY\s*20\d{2,4})\b/i);
+  if (timeMatch && !lead.action_due_date) {
+    const ctx = combined.slice(Math.max(0, combined.indexOf(timeMatch[0]) - 40), combined.indexOf(timeMatch[0]) + timeMatch[0].length + 60);
+    addFact('timing', timeMatch[0], ctx.trim());
+  }
+
+  // ── Approval / authorization status ──
+  const statusPatterns = [
+    { pat: /\b(approved|authorized|adopted|passed|granted)\b.*?\b(by\s+(?:city\s+council|board|commission|mra|county|voters?|governing body))\b/i, conf: 'source_verified' },
+    { pat: /\b(awarded|selected|contracted)\b.*?\b(to|for)\s+([A-Z][\w\s&]+)/i, conf: 'source_verified' },
+    { pat: /\b(funded|funded at|funding approved|funding authorized|bond\s+(?:passed|approved))\b/i, conf: 'source_verified' },
+  ];
+  for (const { pat, conf } of statusPatterns) {
+    const m = combined.match(pat);
+    if (m) { addFact('status', m[0].slice(0, 100).trim(), m[0], conf); break; }
+  }
+
+  // ── Design / engineering ──
+  const aeMatch = combined.match(/\b(design\s+(?:and\s+)?engineering|architectural services|a\/e\s+services|consultant selection|design services|pre-?design|schematic design|design development)\b[^.;]{0,60}/i);
+  if (aeMatch) addFact('ae_signal', aeMatch[0].trim(), aeMatch[0]);
+
+  // ── Procurement ──
+  const procMatch = combined.match(/\b(rfq|rfp|solicitation|invitation to bid|request for (?:proposal|qualification|quote))\b[^.;]{0,80}/i);
+  if (procMatch) addFact('procurement', procMatch[0].trim(), procMatch[0]);
+
+  // ── Owner / partners ──
+  const ownerPatterns = [
+    /\b(City of Missoula|Missoula County|Missoula Redevelopment Agency|MRA|Missoula Housing Authority|MCPS|Airport Authority|University of Montana|Mountain Line|MEP|MDA)\b/i,
+    /\b(developer|owner|partner|applicant|client)\s*:\s*([A-Z][\w\s&',]+)/i,
+  ];
+  for (const pat of ownerPatterns) {
+    const m = combined.match(pat);
+    if (m) { addFact('owner', (m[2] || m[1] || m[0]).trim(), m[0], 'extracted'); break; }
+  }
+
+  // ── Project stage ──
+  const stageMap = [
+    { pat: /\b(under construction|construction underway|groundbreaking|site work begun)\b/i, stage: 'Construction' },
+    { pat: /\b(awarded|contract awarded|designer selected|architect selected)\b/i, stage: 'Awarded' },
+    { pat: /\b(rfq|rfp|solicitation|invitation to bid)\b/i, stage: 'Procurement' },
+    { pat: /\b(schematic design|design development|construction documents|pre-?design)\b/i, stage: 'Design' },
+    { pat: /\b(feasibility|master plan|programming|condition assessment)\b/i, stage: 'Planning' },
+    { pat: /\b(bond|levy|funding\s+(approved|request|reservation)|capital\s+(budget|improvement))\b/i, stage: 'Funding' },
+    { pat: /\b(rezoning|annexation|subdivision|conditional use|development review)\b/i, stage: 'Entitlements' },
+  ];
+  for (const { pat, stage } of stageMap) {
+    const m = combined.match(pat);
+    if (m) {
+      const ctx = combined.slice(Math.max(0, combined.indexOf(m[0]) - 30), combined.indexOf(m[0]) + m[0].length + 50);
+      addFact('stage', stage, ctx.trim());
+      break;
+    }
+  }
+
+  // ── Location ──
+  if (lead.location && lead.location !== 'Missoula, MT' && lead.location.length > 5) {
+    addFact('location', lead.location, '', 'lead_field');
+  }
+  const addrMatch = combined.match(/\b(\d{2,5}\s+(?:North|South|East|West|N|S|E|W\.?)?\s*[A-Z][\w\s]{3,30}(?:Avenue|Street|Road|Drive|Boulevard|Way|Lane|Court|Place|Circle|Highway|Blvd|Ave|St|Rd|Dr|Ln|Ct|Pl|Hwy))\b/i);
+  if (addrMatch) addFact('address', addrMatch[0].trim(), addrMatch[0]);
+
+  return facts;
 }
 
 // Generate a brief 2-4 sentence highlight summary
@@ -5457,7 +5569,7 @@ export default async function handler(req, res) {
         }
       }
 
-      // Step 7: Post-process: add highlight fields to all added leads
+      // Step 7: Post-process: add highlight fields + structured evidence facts
       for (const lead of added) {
         if (!lead.projectPotential) {
           const combined = `${lead.title || ''} ${lead.description || ''}`;
@@ -5467,6 +5579,9 @@ export default async function handler(req, res) {
           const signals = inferWhyAndWatch(`${lead.title || ''} ${lead.description || ''}`);
           if (!lead.whyItMatters || lead.whyItMatters.length < 10) lead.whyItMatters = signals.whyItMatters;
           if (!lead.whatToWatch) lead.whatToWatch = signals.whatToWatch;
+        }
+        if (!lead.evidenceFacts || lead.evidenceFacts.length === 0) {
+          lead.evidenceFacts = extractEvidenceFacts(lead);
         }
       }
 
@@ -7001,7 +7116,7 @@ export default async function handler(req, res) {
       if (added.length >= (action === 'daily' ? 10 : 40)) { log('  — lead cap reached'); break; }
     }
 
-    // v4-b25: Post-process all added leads with highlight fields (news + project intelligence)
+    // v4-b33: Post-process all added leads with highlight fields + structured evidence facts
     for (const lead of added) {
       if (!lead.projectPotential) {
         const combined = `${lead.title || ''} ${lead.description || ''} ${lead.whyItMatters || ''}`;
@@ -7014,9 +7129,12 @@ export default async function handler(req, res) {
         if (!lead.whatToWatch) lead.whatToWatch = signals.whatToWatch;
       }
       if (!lead.highlightSummary && lead.description) {
-        // Generate a brief highlight from the description (first 2-3 meaningful sentences)
         const sentences = (lead.description || '').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/).filter(s => s.length > 20 && s.length < 300);
         lead.highlightSummary = sentences.slice(0, 3).join(' ').slice(0, 350);
+      }
+      // v4-b33: Extract and attach structured evidence facts
+      if (!lead.evidenceFacts || lead.evidenceFacts.length === 0) {
+        lead.evidenceFacts = extractEvidenceFacts(lead);
       }
     }
 
