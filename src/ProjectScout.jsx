@@ -8360,43 +8360,7 @@ export default function ProjectScout() {
             return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
           };
 
-          // ═══ BRIEF ARCHIVE / CONTINUITY ═══
-          const BRIEF_STORAGE_KEY = 'ps_news_brief_archive';
-          const loadArchive = () => { try { return JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || '[]'); } catch { return []; } };
-          const archive = loadArchive();
-          const priorBrief = archive.length > 0 ? archive[archive.length - 1] : null;
-
-          // Compare current 7d titles to prior brief titles → new / continuing / dropped
-          const current7dTitles = new Set(within7d.map(l => (l.title || '').toLowerCase().trim()));
-          const prior7dTitles = new Set((priorBrief?.titles7d || []).map(t => t.toLowerCase().trim()));
-          const newItems = within7d.filter(l => !prior7dTitles.has((l.title || '').toLowerCase().trim()));
-          const continuingItems = within7d.filter(l => prior7dTitles.has((l.title || '').toLowerCase().trim()));
-          const droppedTitles = [...prior7dTitles].filter(t => !current7dTitles.has(t));
-          const continuityStatus = (lead) => {
-            const tl = (lead.title || '').toLowerCase().trim();
-            if (priorBrief && prior7dTitles.has(tl)) return 'continuing';
-            if (priorBrief && !prior7dTitles.has(tl)) return 'new';
-            return null;
-          };
-
-          // Publish current brief snapshot
-          const publishBrief = () => {
-            const snapshot = {
-              date: new Date().toISOString(),
-              titles7d: within7d.map(l => l.title || ''),
-              titles30d: within30d.map(l => l.title || ''),
-              high: within7d.filter(l => l.projectPotential === 'high').length,
-              med: within7d.filter(l => l.projectPotential === 'medium').length,
-              total7d: within7d.length,
-              total30d: within30d.length,
-              narrative7d: generateNarrative(sortItems(within7d), 'last 7 days'),
-            };
-            const updated = [...archive.slice(-4), snapshot]; // keep last 5
-            try { localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(updated)); } catch {}
-            return updated;
-          };
-
-          // ═══ NARRATIVE + SYNOPSIS ═══
+          // ═══ NARRATIVE GENERATOR (must be defined before archive block uses it) ═══
           const generateNarrative = (items, windowLabel) => {
             if (items.length === 0) return '';
             const sorted = sortItems(items);
@@ -8418,6 +8382,93 @@ export default function ProjectScout() {
             return parts.join(' ');
           };
 
+          // ═══ BRIEF ARCHIVE / CONTINUITY (v4-b29: auto-publish cadence) ═══
+          const BRIEF_STORAGE_KEY = 'ps_news_brief_archive';
+          const loadArchive = () => { try { return JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || '[]'); } catch { return []; } };
+
+          // Week identifier: ISO week number + year (e.g., "2026-W16")
+          const getWeekId = (d) => {
+            const dt = new Date(d); dt.setHours(0, 0, 0, 0);
+            dt.setDate(dt.getDate() + 3 - ((dt.getDay() + 6) % 7));
+            const jan4 = new Date(dt.getFullYear(), 0, 4);
+            const wk = 1 + Math.round(((dt - jan4) / DAY + (jan4.getDay() + 6) % 7 - 3) / 7);
+            return `${dt.getFullYear()}-W${String(wk).padStart(2, '0')}`;
+          };
+          const currentWeekId = getWeekId(Date.now());
+          const weekLabel = (() => {
+            const dt = new Date(); dt.setHours(0, 0, 0, 0);
+            const dayOfWeek = (dt.getDay() + 6) % 7; // 0=Mon
+            const monday = new Date(dt); monday.setDate(dt.getDate() - dayOfWeek);
+            const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+            const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return `Week of ${fmt(monday)} – ${fmt(sunday)}, ${monday.getFullYear()}`;
+          })();
+
+          // Build a snapshot (reusable for auto + manual publish)
+          const buildSnapshot = () => ({
+            date: new Date().toISOString(),
+            weekId: currentWeekId,
+            weekLabel,
+            titles7d: within7d.map(l => l.title || ''),
+            titles30d: within30d.map(l => l.title || ''),
+            high: within7d.filter(l => l.projectPotential === 'high').length,
+            med: within7d.filter(l => l.projectPotential === 'medium').length,
+            total7d: within7d.length,
+            total30d: within30d.length,
+            narrative7d: generateNarrative(sortItems(within7d), 'last 7 days'),
+          });
+
+          // Save snapshot to archive (max 8 weekly entries)
+          const saveSnapshot = (snapshot, existingArchive) => {
+            // Replace same-week entry if present, otherwise append
+            const others = existingArchive.filter(s => s.weekId !== snapshot.weekId);
+            const updated = [...others.slice(-7), snapshot];
+            try { localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(updated)); } catch {}
+            return updated;
+          };
+
+          // Load archive + auto-publish logic
+          let archive = loadArchive();
+          const thisWeekBrief = archive.find(s => s.weekId === currentWeekId);
+          const priorWeekBriefs = archive.filter(s => s.weekId && s.weekId < currentWeekId).sort((a, b) => b.weekId.localeCompare(a.weekId));
+          const priorBrief = priorWeekBriefs.length > 0 ? priorWeekBriefs[0] : null;
+
+          // Auto-publish: if this week has no snapshot yet AND we have items, publish automatically
+          let autoPublished = false;
+          if (!thisWeekBrief && within7d.length > 0) {
+            const snap = buildSnapshot();
+            archive = saveSnapshot(snap, archive);
+            autoPublished = true;
+          }
+
+          // Determine the "comparison target" for continuity:
+          // Compare live data against the PRIOR WEEK's brief (not this week's, since this week is current)
+          const comparisonBrief = priorBrief;
+          const current7dTitles = new Set(within7d.map(l => (l.title || '').toLowerCase().trim()));
+          const prior7dTitles = new Set((comparisonBrief?.titles7d || []).map(t => t.toLowerCase().trim()));
+          const newItems = within7d.filter(l => !prior7dTitles.has((l.title || '').toLowerCase().trim()));
+          const continuingItems = within7d.filter(l => prior7dTitles.has((l.title || '').toLowerCase().trim()));
+          const droppedTitles = [...prior7dTitles].filter(t => !current7dTitles.has(t));
+          const continuityStatus = (lead) => {
+            const tl = (lead.title || '').toLowerCase().trim();
+            if (comparisonBrief && prior7dTitles.has(tl)) return 'continuing';
+            if (comparisonBrief && !prior7dTitles.has(tl)) return 'new';
+            return null;
+          };
+
+          // Detect if live data has changed since this week's published snapshot
+          const publishedThisWeek = archive.find(s => s.weekId === currentWeekId);
+          const liveTitles7d = within7d.map(l => (l.title || '').toLowerCase().trim()).sort().join('|');
+          const pubTitles7d = (publishedThisWeek?.titles7d || []).map(t => t.toLowerCase().trim()).sort().join('|');
+          const hasLiveChanges = publishedThisWeek && liveTitles7d !== pubTitles7d;
+
+          // Manual re-publish (updates this week's snapshot)
+          const republishBrief = () => {
+            const snap = buildSnapshot();
+            archive = saveSnapshot(snap, archive);
+          };
+
+          // ═══ SYNOPSIS BUILDER ═══
           const buildSynopsis = (items, windowLabel) => {
             if (items.length === 0) return null;
             const sorted = sortItems(items);
@@ -8562,28 +8613,54 @@ export default function ProjectScout() {
                     {s.label}{s.count !== undefined ? <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 3 }}>{s.count}</span> : null}
                   </button>
                 ))}
-                {/* Publish brief button */}
-                {within7d.length > 0 && (
-                  <button onClick={() => { publishBrief(); alert('Brief snapshot published. Reload the News tab to see continuity comparison.'); }} style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 5, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: 10.5, fontWeight: 600, color: '#64748b' }}>
-                    <Bookmark size={11} style={{ marginRight: 3, verticalAlign: '-1px' }} />Publish Brief
-                  </button>
-                )}
+                {/* Week label + publish state */}
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500 }}>{weekLabel}</span>
+                  {publishedThisWeek && !hasLiveChanges && (
+                    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontWeight: 600 }}>Published</span>
+                  )}
+                  {publishedThisWeek && hasLiveChanges && (
+                    <button onClick={() => { republishBrief(); window.location.reload(); }} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 600, cursor: 'pointer' }}>
+                      Updated — Republish
+                    </button>
+                  )}
+                  {!publishedThisWeek && within7d.length > 0 && (
+                    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', fontWeight: 600 }}>Auto-published</span>
+                  )}
+                </div>
               </div>
 
               {/* ══ SECTION 1: Executive Brief ══ */}
               {newsSection === 'brief' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {/* Prior brief indicator */}
-                  {priorBrief && (
-                    <div style={{ padding: '8px 14px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#64748b' }}>
-                      <Bookmark size={12} style={{ color: '#94a3b8' }} />
-                      <span>Last published: <strong style={{ color: '#475569' }}>{new Date(priorBrief.date).toLocaleDateString()}</strong></span>
-                      <span>· {priorBrief.total7d} items · {priorBrief.high || 0} high</span>
-                      <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                        {newItems.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af', fontWeight: 600 }}>{newItems.length} new since then</span>}
-                        {droppedTitles.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#fef9c3', color: '#a16207', fontWeight: 600 }}>{droppedTitles.length} cooled off</span>}
-                        {continuingItems.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534', fontWeight: 600 }}>{continuingItems.length} ongoing</span>}
-                      </span>
+                  {/* Continuity comparison: current week vs prior week */}
+                  {comparisonBrief && (
+                    <div style={{ padding: '10px 14px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#64748b' }}>
+                        <Bookmark size={12} style={{ color: '#94a3b8' }} />
+                        <span>Compared to: <strong style={{ color: '#475569' }}>{comparisonBrief.weekLabel || new Date(comparisonBrief.date).toLocaleDateString()}</strong></span>
+                        <span>· {comparisonBrief.total7d} items · {comparisonBrief.high || 0} high</span>
+                        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                          {newItems.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af', fontWeight: 600 }}>{newItems.length} new</span>}
+                          {continuingItems.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534', fontWeight: 600 }}>{continuingItems.length} ongoing</span>}
+                          {droppedTitles.length > 0 && <span style={{ padding: '1px 6px', borderRadius: 4, background: '#fef9c3', color: '#a16207', fontWeight: 600 }}>{droppedTitles.length} cooled off</span>}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {/* Brief archive (recent weeks) */}
+                  {archive.length > 1 && (
+                    <div style={{ padding: '8px 14px', borderRadius: 8, background: '#fafbfc', border: '1px solid #f1f5f9', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Recent briefs</span>
+                      {[...archive].reverse().slice(0, 5).map((s, i) => (
+                        <span key={s.weekId || i} style={{
+                          fontSize: 10, padding: '2px 7px', borderRadius: 4, fontWeight: 600,
+                          background: s.weekId === currentWeekId ? '#0f172a' : '#f1f5f9',
+                          color: s.weekId === currentWeekId ? '#fff' : '#64748b',
+                        }}>
+                          {s.weekLabel || s.weekId || new Date(s.date).toLocaleDateString()} · {s.total7d} items · {s.high || 0}H
+                        </span>
+                      ))}
                     </div>
                   )}
                   <SynopsisBlock syn={syn7} label="Last 7 Days" accent="#3b82f6" showContinuity={true} />
