@@ -1058,6 +1058,45 @@ function generateWhatToWatch(lead) {
 }
 
 
+// v4-b31: A&E service fit assessment — honest, practical, specific to architecture/interiors/planning
+function generateServiceFit(lead) {
+  const txt = `${lead.title || ''} ${lead.description || ''} ${lead.highlightSummary || ''}`.toLowerCase();
+  const fits = [];
+
+  // Strong fit indicators
+  if (/\b(architect|a\/e|design services|engineering services|design.?build|schematic design|design development|construction documents|pre.?design)\b/.test(txt)) fits.push({ service: 'Architecture / Engineering', strength: 'strong', reason: 'Design services explicitly referenced' });
+  else if (/\b(renovation|remodel|modernization|addition|expansion|replacement)\b/.test(txt) && /\b(building|facility|school|hospital|campus|terminal|station|library|courthouse|center)\b/.test(txt)) fits.push({ service: 'Architecture', strength: 'strong', reason: 'Building renovation/expansion with named facility' });
+  else if (/\b(new (building|facility|school|hospital|campus|terminal|station|library|courthouse|center|dormitory|clinic))\b/.test(txt)) fits.push({ service: 'Architecture', strength: 'strong', reason: 'New facility construction' });
+
+  // Medium fit indicators
+  if (/\b(master plan|feasibility|study|assessment|condition assessment)\b/.test(txt) && /\b(building|facility|campus|school|hospital)\b/.test(txt)) fits.push({ service: 'Planning / Feasibility', strength: 'medium', reason: 'Planning or assessment for facility' });
+  if (/\b(interior|fit.?out|tenant improvement|furnish|furniture)\b/.test(txt) && /\b(building|office|space|floor)\b/.test(txt)) fits.push({ service: 'Interior Design', strength: 'medium', reason: 'Interior work indicated' });
+  if (/\b(housing|mixed.?use|residential|apartment|affordable)\b/.test(txt) && /\b(development|project|construction|design)\b/.test(txt)) fits.push({ service: 'Housing / Mixed-Use Design', strength: 'medium', reason: 'Housing or mixed-use development' });
+  if (/\b(park|recreation center|community center|playground|trail)\b/.test(txt) && /\b(design|master plan|improvement|renovation)\b/.test(txt)) fits.push({ service: 'Recreation / Civic', strength: 'medium', reason: 'Public recreation facility work' });
+
+  // Weak fit — monitor only
+  if (fits.length === 0) {
+    if (/\b(infrastructure|water main|sewer|utility|street|bridge|road)\b/.test(txt)) fits.push({ service: 'Civil / Infrastructure', strength: 'low', reason: 'Infrastructure — typically civil, not A&E building scope' });
+    else if (/\b(redevelopment|urd|tedd|district|corridor)\b/.test(txt)) fits.push({ service: 'Planning / Urban Design', strength: 'low', reason: 'Redevelopment area — may generate A&E work downstream' });
+    else fits.push({ service: 'Monitor', strength: 'low', reason: 'No clear A&E scope yet — monitor for project definition' });
+  }
+  return fits;
+}
+
+// v4-b31: Infer project stage from content signals
+function inferProjectStage(lead) {
+  const txt = `${lead.title || ''} ${lead.description || ''} ${lead.highlightSummary || ''} ${lead.whyItMatters || ''}`.toLowerCase();
+  if (/\b(under construction|construction underway|breaking ground|groundbreaking|site work|foundation|steel|framing)\b/.test(txt)) return { stage: 'Construction', icon: '🏗️' };
+  if (/\b(awarded|contract awarded|selected|consultant selected|designer selected|architect selected)\b/.test(txt)) return { stage: 'Awarded / Claimed', icon: '⚠️' };
+  if (/\b(rfq|rfp|solicitation|invitation to bid|request for (proposal|qualification|quote))\b/.test(txt)) return { stage: 'Procurement', icon: '📋' };
+  if (/\b(schematic design|design development|construction documents|pre.?design|design services authorized)\b/.test(txt)) return { stage: 'Design', icon: '✏️' };
+  if (/\b(feasibility|study|assessment|master plan|programming|planning)\b/.test(txt) && /\b(facility|building|campus|school)\b/.test(txt)) return { stage: 'Planning / Feasibility', icon: '📐' };
+  if (/\b(bond|levy|funding (approved|request|reservation|application)|capital (budget|improvement|project))\b/.test(txt)) return { stage: 'Funding / Pre-Design', icon: '💰' };
+  if (/\b(approved|authorized|adopted|passed|granted)\b/.test(txt) && /\b(zoning|rezoning|conditional use|annexation|subdivision|permit)\b/.test(txt)) return { stage: 'Entitlements / Approvals', icon: '✅' };
+  if (/\b(development|redevelopment|proposed|planned|future)\b/.test(txt)) return { stage: 'Early Development', icon: '🔍' };
+  return { stage: 'Unknown', icon: '❓' };
+}
+
 /* ═══════════════════════════════════════════════════════════════
    EVIDENCE LINK HELPERS
    ═══════════════════════════════════════════════════════════════ */
@@ -1640,14 +1679,53 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
                   )}
                 </DetailSection>
 
-                {/* AI Assessment + What to Watch — combined into one actionable section */}
-                <DetailSection title="Scout Assessment">
+                {/* v4-b31: BD Intelligence Panel — project stage, A&E fit, key signals */}
+                <DetailSection title="BD Intelligence">
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {lead.aiReasonForAddition && (
-                      <div style={{ padding: '10px 14px', borderRadius: 8, background: '#f8fafc', borderLeft: '3px solid #6366f1' }}>
-                        <p style={{ ...detailText, color: '#475569', margin: 0 }}>{lead.aiReasonForAddition}</p>
+                    {/* Project stage + A&E fit side by side */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      {(() => { const ps = inferProjectStage(lead); return (
+                        <div style={{ padding: '8px 12px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Project Stage</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>{ps.icon} {ps.stage}</div>
+                        </div>
+                      ); })()}
+                      {(() => { const fits = generateServiceFit(lead); const top = fits[0]; const colors = { strong: { bg: '#dcfce7', fg: '#166534', border: '#bbf7d0' }, medium: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' }, low: { bg: '#f1f5f9', fg: '#64748b', border: '#e2e8f0' } }; const c = colors[top.strength] || colors.low; return (
+                        <div style={{ padding: '8px 12px', borderRadius: 8, background: c.bg, border: `1px solid ${c.border}` }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, color: c.fg, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>A&E Fit</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: c.fg }}>{top.strength.toUpperCase()}: {top.service}</div>
+                          <div style={{ fontSize: 10, color: c.fg, opacity: 0.8, marginTop: 1 }}>{top.reason}</div>
+                        </div>
+                      ); })()}
+                    </div>
+                    {/* Key extracted signals */}
+                    {(lead.potentialBudget || lead.action_due_date || lead.whatToWatch) && (
+                      <div style={{ padding: '8px 12px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fef3c7', display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11.5 }}>
+                        {lead.potentialBudget && <div><span style={{ fontWeight: 700, color: '#b45309' }}>Budget: </span><span style={{ color: '#92400e' }}>{lead.potentialBudget}</span></div>}
+                        {lead.action_due_date && <div><span style={{ fontWeight: 700, color: '#b45309' }}>Due: </span><span style={{ color: '#92400e' }}>{lead.action_due_date}</span></div>}
+                        {lead.projectPotential && <div><span style={{ fontWeight: 700, color: '#b45309' }}>Potential: </span><span style={{ color: '#92400e', textTransform: 'uppercase' }}>{lead.projectPotential}</span></div>}
                       </div>
                     )}
+                    {/* Why it matters — concise */}
+                    {(lead.whyItMatters || lead.aiReasonForAddition) && (
+                      <div style={{ padding: '8px 12px', borderRadius: 8, background: '#f0f4ff', borderLeft: '3px solid #3b82f6' }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Why it matters</div>
+                        <p style={{ ...detailText, color: '#334155', margin: 0 }}>{lead.whyItMatters || lead.aiReasonForAddition}</p>
+                      </div>
+                    )}
+                    {/* What to watch — item-specific */}
+                    {lead.whatToWatch && (
+                      <div style={{ padding: '8px 12px', borderRadius: 8, background: '#faf5ff', borderLeft: '3px solid #8b5cf6' }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>What to watch</div>
+                        <p style={{ ...detailText, color: '#475569', margin: 0 }}>{lead.whatToWatch}</p>
+                      </div>
+                    )}
+                  </div>
+                </DetailSection>
+
+                {/* Scout Assessment + What to Watch — generic watch items */}
+                <DetailSection title="Scout Assessment">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ padding: '10px 14px', borderRadius: 8, background: '#eff6ff', borderLeft: '3px solid #3b82f6' }}>
                       <p style={{ ...detailText, color: '#1e40af', margin: 0, whiteSpace: 'pre-line', fontSize: 11.5 }}>{generateWhatToWatch(lead)}</p>
                     </div>

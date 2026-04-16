@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.26-20260416-server-daily-scan-b31';
+const SCAN_BUILD_ID = 'scan-v4.27-20260416-content-quality-b32';
 
 // ── v4-b29: Server-side weekly brief publish (to Upstash Redis) ─────
 // Computes a weekly brief snapshot from the scan's lead corpus and stores it
@@ -1138,9 +1138,29 @@ function normalizeHighlightTitle(rawTitle, bodyChunk) {
  * Returns an array of highlight-lead objects (can be 1 or more).
  * Each has enriched fields: highlightSummary, projectPotential, whyItMatters, whatToWatch.
  */
+// v4-b31: Sender-based and subject-based Gmail suppression
+// Emails from these senders or with these subject patterns are almost never A&E-relevant.
+function isGmailSuppressed(email) {
+  const from = (email.from || '').toLowerCase();
+  const subj = (email.subject || '').toLowerCase();
+  const body = (email.bodyText || email.snippet || '').toLowerCase().slice(0, 500);
+  // Sender suppression: general newsletters, advocacy, media digests, non-project senders
+  if (/\b(thepulp|mountainjournal|substack|mailchimp|constantcontact|actionnetwork|everyaction|change\.org|moveon|indivisible|petitions?|gofundme|kickstarter|patreon)\b/.test(from)) return 'newsletter_sender';
+  // Subject suppression: roundups, most-read, opinion/editorial, generic digests
+  if (/\b(most read|top stories|weekly roundup|daily digest|morning brief|evening brief|what you missed|in case you missed|icymi|breaking news|opinion|editorial|letter to the editor|year in review|best of \d{4}|holiday|weekend events?|things to do|restaurant|dining|recipe|film|movie|concert|festival|gallery|exhibit|obituar|memorial|tribute)\b/.test(subj)) return 'generic_subject';
+  // Content suppression: no A&E signal in body
+  const hasSignal = /\b(construction|renovation|design|building|facility|development|redevelopment|housing|infrastructure|capital|bond|rfp|rfq|solicitation|procurement|bid|project|master plan|feasibility|engineering|architect|permit|rezoning|annexation|subdivision|school|hospital|campus|airport|fire station|library|courthouse)\b/.test(body);
+  if (!hasSignal && body.length > 200) return 'no_ae_signal';
+  return null;
+}
+
 function extractHighlightsFromEmail(email, src, existingLeads = []) {
   const subject = (email.subject || '').trim();
   if (!subject || subject.length < 5) return [];
+
+  // v4-b31: Early suppression of low-value emails
+  const suppressed = isGmailSuppressed(email);
+  if (suppressed) return [];
 
   const bodyText = email.bodyText || email.snippet || '';
   const linkedTexts = (email.linkedContent || []).map(lc => lc.content || '').join('\n\n');
@@ -1378,18 +1398,27 @@ function isRetrospectiveTitle(title) {
 // Catches news-style titles that are too vague or broad to be actionable leads.
 function isGenericNewsHeadline(title) {
   const lo = (title || '').toLowerCase();
-  // Market trend commentary: "X Market Continues to Grow/Evolve/Struggle"
+  // Market trend commentary
   if (/\b(market|industry|sector)\s+(continues?|expected|projected|forecast|trending|slowing|growing|evolving|struggling|booming|recovering)\b/.test(lo)) return true;
-  // "Report: X" / "Study: X" / "Survey: X" — commentary not project
-  if (/^(report|study|survey|analysis|overview|update|recap|summary|review|roundup|preview|profile|spotlight|feature):/i.test(lo)) return true;
-  // "What You Need to Know About X" / "Everything You Need to Know"
-  if (/\b(what\s+you\s+need\s+to\s+know|everything\s+you|here.?s\s+what|what\s+to\s+expect|things?\s+to\s+know)\b/.test(lo)) return true;
+  // "Report: X" / "Study: X" etc
+  if (/^(report|study|survey|analysis|overview|update|recap|summary|review|roundup|preview|profile|spotlight|feature|opinion|editorial|letter|column|podcast|video|webinar|workshop):/i.test(lo)) return true;
+  // Conversational / engagement patterns
+  if (/\b(what\s+you\s+need\s+to\s+know|everything\s+you|here.?s\s+what|what\s+to\s+expect|things?\s+to\s+know|in\s+case\s+you\s+missed|icymi)\b/.test(lo)) return true;
   // "How X Is Changing Y" / "Why X Matters"
   if (/^(how|why)\s+.{5,}\s+(is|are|was|were|matters?|affects?|impacts?|changes?|work)\b/i.test(lo) &&
       !/\b(rfq|rfp|solicitation|renovation|construction|design|project|building|facility)\b/.test(lo)) return true;
-  // List-style: "Top 10 X" / "5 Things" / "Best X"
+  // List-style
   if (/^(top\s+\d+|\d+\s+(things?|ways?|reasons?|tips?|facts?|trends?)|best|worst|biggest|most)\s+/i.test(lo) &&
       !/\b(construction|project|renovation|building|facility|development)\b/.test(lo)) return true;
+  // v4-b31: Newsletter subjects, generic agenda notifications, cultural/lifestyle
+  if (/\b(newsletter|digest|bulletin|weekly wrap|daily wrap|morning (edition|update)|evening (edition|update)|weekend (edition|guide)|most read|breaking news)\b/.test(lo)) return true;
+  if (/\b(agenda published|agenda (available|posted)|meeting (scheduled|notice|reminder)|public (hearing|comment)\s+(period|notice|opportunity))\b/.test(lo) &&
+      !/\b(rfq|rfp|solicitation|project|design|construction|renovation|building|facility|capital|bond|budget)\b/.test(lo)) return true;
+  // Cultural, lifestyle, recreation, dining, entertainment — not A&E project signals
+  if (/\b(restaurant|dining|recipe|chef|food|brew|beer|wine|concert|festival|gallery|exhibit|art show|film|movie|theater|theatre|museum|trail run|marathon|rodeo|parade|celebration|holiday|christmas|thanksgiving|halloween|valentines)\b/.test(lo) &&
+      !/\b(construction|renovation|design|building|facility|development|expansion)\b/.test(lo)) return true;
+  // Trial, crime, court, lawsuit, obituary, memorial
+  if (/\b(trial\s+by|trial\s+for|trial\s+of|court\s+(case|ruling|hearing)|lawsuit|defendant|accused|sentenced|arrested|obituar|memorial|tribute|funeral|missing person|amber alert|silver alert)\b/.test(lo)) return true;
   return false;
 }
 
@@ -2737,6 +2766,9 @@ function isNoiseLead(title, ctx, src) {
 
   // Equipment-only procurement (no design scope)
   if (/\b(equipment (purchase|bid|procurement|lease)|vehicle (purchase|lease)|apparatus (purchase|bid)|fire (truck|engine|apparatus) (purchase|bid))\b/.test(ctxLo) && !/\b(design|architect|building|facility|renovation|addition|station)\b/.test(ctxLo)) return true;
+
+  // v4-b31: Operating/admin budget items with no A&E project character
+  if (/\b(operating (budget|expense|cost)|personnel (cost|budget)|salary|wages|benefits|health insurance|retirement|pension|workers.?\s*comp|wellness program|training (budget|program)|professional development|subscription|membership (fee|dues)|software (license|subscription)|office (supplies|lease|rent)|utilities?\s+(budget|cost)|fuel (budget|cost)|fleet (maintenance|replacement)|vehicle (maintenance|replacement))\b/.test(ctxLo) && !/\b(design|architect|building|facility|renovation|construction|addition|expansion|capital improvement|new (building|facility|school|station|campus))\b/.test(ctxLo)) return true;
 
   // Permits, regulatory, and administrative — not A&E project signals
   if (/\b(building permit|commercial permit|residential permit|permit (application|fee|process|requirement)|permit renewal)\b/i.test(ctxLo) && !/\b(design|architect|renovation|construction of|new (building|facility|school|station))\b/.test(ctxLo)) return true;
