@@ -732,6 +732,42 @@ function cleanDescriptionForCard(desc) {
   return desc.replace(/\s*—\s*Source:\s*[^.]+\.?\s*$/, '').trim();
 }
 
+// v4-b35: Queue row for master-detail layout
+const QUEUE_GRID = 'minmax(180px,2.5fr) minmax(70px,0.8fr) minmax(110px,1.2fr) minmax(65px,0.5fr) minmax(50px,0.4fr) minmax(60px,0.5fr)';
+function QueueHeader() {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: QUEUE_GRID, gap: 6, padding: '5px 12px', borderBottom: '2px solid #e2e8f0', background: '#fafbfc', fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+      <div>Item</div><div>Entity</div><div>Watch</div><div>Stage</div><div>Fit</div><div>Signal</div>
+    </div>
+  );
+}
+function QueueRow({ lead, isSelected, onClick }) {
+  const ps = inferProjectStage(lead);
+  const fits = generateServiceFit(lead);
+  const topFit = fits[0] || { strength: 'low' };
+  const fitColors = { strong: '#166534', medium: '#92400e', low: '#94a3b8' };
+  return (
+    <div onClick={onClick} style={{
+      display: 'grid', gridTemplateColumns: QUEUE_GRID, gap: 6, padding: '9px 12px', cursor: 'pointer',
+      borderBottom: '1px solid #f5f5f7', alignItems: 'center',
+      background: isSelected ? '#f0f4ff' : '#fff', borderLeft: isSelected ? '3px solid #3b82f6' : '3px solid transparent',
+      transition: 'background 0.08s',
+    }}
+      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fafbfe'; }}
+      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = isSelected ? '#f0f4ff' : '#fff'; }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, lineHeight: 1.3 }}>{cleanHtmlEntities(lead.title)}</div>
+        {lead.whyItMatters && <div style={{ fontSize: 10, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{lead.whyItMatters}</div>}
+      </div>
+      <div style={{ fontSize: 10, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.owner || lead.sourceName || '—'}</div>
+      <div style={{ fontSize: 10, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.whatToWatch || '—'}</div>
+      <div style={{ fontSize: 9.5, color: '#475569' }}>{ps.icon} <span style={{ fontSize: 9 }}>{ps.stage !== 'Unknown' ? ps.stage.split('/')[0].trim().split(' ')[0] : '—'}</span></div>
+      <div style={{ fontSize: 9, fontWeight: 700, color: fitColors[topFit.strength] }}>{(topFit.strength || '—').toUpperCase()}</div>
+      <div style={{ fontSize: 9.5, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.potentialBudget || (lead.action_due_date ? lead.action_due_date.slice(0,10) : '—')}</div>
+    </div>
+  );
+}
+
 function LeadCard({ lead, onClick, style: animStyle, batchMode, batchSelected, onBatchToggle }) {
   const { primary, isNew, isUpdated } = getOperationalStatus(lead);
   const badge = statusBadge(primary);
@@ -1300,9 +1336,7 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: 560,
-      background: '#fff', boxShadow: '-8px 0 40px rgba(0,0,0,0.12)', zIndex: 1000,
-      display: 'flex', flexDirection: 'column', animation: 'slideIn 0.25s ease',
+      display: 'flex', flexDirection: 'column', height: '100%', background: '#fff',
     }}>
       {/* Header */}
       <div style={{ padding: '18px 22px 0', borderBottom: '1px solid #f1f5f9', flexShrink: 0 }}>
@@ -8447,60 +8481,58 @@ export default function ProjectScout() {
         </div>
       </header>
 
-      {/* ─── MAIN CONTENT ─── */}
-      <main style={{ maxWidth: 1320, margin: '0 auto', padding: '28px 28px 80px' }}>
-        {/* v4-b22: Admin panel (Sources, Taxonomy, Settings) — shown when gear icon is clicked */}
-        {showAdmin && (
-          <div style={{ marginBottom: 24, padding: '16px 20px', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>Admin</span>
-              {['settings', 'registry', 'taxonomy'].map(t => (
-                <button key={t} onClick={() => setAdminTab(t)} style={{
-                  padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                  background: adminTab === t ? '#0f172a' : '#fff', color: adminTab === t ? '#fff' : '#64748b',
-                  border: `1px solid ${adminTab === t ? '#0f172a' : '#e2e8f0'}`,
-                }}>{t === 'settings' ? 'Settings' : t === 'registry' ? 'Sources' : 'Taxonomy'}</button>
-              ))}
-              <button onClick={() => setShowAdmin(false)} style={{ marginLeft: 'auto', padding: '2px 8px', borderRadius: 4, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: 11, color: '#94a3b8' }}>Close</button>
+      {/* ─── MAIN CONTENT — v4-b35: Master-Detail Shell ─── */}
+      <main style={{ display: 'flex', height: 'calc(100vh - 58px)', overflow: 'hidden' }}>
+        {/* ═══ LEFT: Queue Panel ═══ */}
+        <div style={{ flex: selectedLead ? '0 0 50%' : '1 1 100%', minWidth: 0, display: 'flex', flexDirection: 'column', borderRight: selectedLead ? '1px solid #e2e8f0' : 'none', transition: 'flex 0.2s ease' }}>
+          {/* Admin panel */}
+          {showAdmin && (
+            <div style={{ padding: '12px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#475569' }}>Admin</span>
+                {['settings', 'registry', 'taxonomy'].map(t => (
+                  <button key={t} onClick={() => setAdminTab(t)} style={{
+                    padding: '3px 10px', borderRadius: 5, fontSize: 10.5, fontWeight: 600, cursor: 'pointer',
+                    background: adminTab === t ? '#0f172a' : '#fff', color: adminTab === t ? '#fff' : '#64748b',
+                    border: `1px solid ${adminTab === t ? '#0f172a' : '#e2e8f0'}`,
+                  }}>{t === 'settings' ? 'Settings' : t === 'registry' ? 'Sources' : 'Taxonomy'}</button>
+                ))}
+                <button onClick={() => setShowAdmin(false)} style={{ marginLeft: 'auto', padding: '2px 8px', borderRadius: 4, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', fontSize: 10, color: '#94a3b8' }}>Close</button>
+              </div>
+              <div style={{ maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }}>
+                {adminTab === 'settings' && <SettingsTab onMergeResults={mergeEngineResults} onRunAsanaCheck={runAsanaCheck} onApplyValidation={(result) => {
+                  if (result && result.keptLeads) {
+                    setLeads(result.keptLeads);
+                    if (result.suppressedLeads?.length > 0) {
+                      setNotPursuedLeads(prev => [...result.suppressedLeads.map(l => ({...l, status:'not_pursued', reasonNotPursued:'Validation: stale or claimed', dateNotPursued:new Date().toISOString()})), ...prev]);
+                    }
+                  }
+                }} allLeads={leads} notPursuedLeads={notPursuedLeads} submittedLeads={submittedLeads} />}
+                {adminTab === 'registry' && <SourceRegistryView />}
+                {adminTab === 'taxonomy' && <TaxonomyView />}
+              </div>
             </div>
-            {adminTab === 'settings' && <SettingsTab onMergeResults={mergeEngineResults} onRunAsanaCheck={runAsanaCheck} onApplyValidation={(result) => {
-              if (result && result.keptLeads) {
-                setLeads(result.keptLeads);
-                if (result.suppressedLeads?.length > 0) {
-                  setNotPursuedLeads(prev => [...result.suppressedLeads.map(l => ({...l, status:'not_pursued', reasonNotPursued:'Validation: stale or claimed', dateNotPursued:new Date().toISOString()})), ...prev]);
-                }
-              }
-            }} allLeads={leads} notPursuedLeads={notPursuedLeads} submittedLeads={submittedLeads} />}
-            {adminTab === 'registry' && <SourceRegistryView />}
-            {adminTab === 'taxonomy' && <TaxonomyView />}
-          </div>
-        )}
+          )}
 
-        {/* v4-tabfix: One real tabpanel at a time. The `key={activeTab}` forces
-            React to fully unmount the previous panel and mount a fresh one on
-            every tab switch — this is the hard guarantee that no two top-level
-            tab views are ever rendered together, and it kills any stale
-            sub-state from the previously-shown tab. */}
-        <section
-          key={activeTab}
-          role="tabpanel"
-          id={`tabpanel-${activeTab}`}
-          aria-labelledby={`tab-${activeTab}`}
-        >
-        <div style={{ marginBottom: 24 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.04em', lineHeight: 1.2 }}>
-            {TABS.find(t => t.id === activeTab)?.label || 'Project Scout'}
-          </h1>
-          <p style={{ fontSize: 13, color: '#94a3b8', margin: '4px 0 0' }}>
-            {activeTab === 'news' && 'Project-relevant news highlights — items that might become opportunities'}
-            {activeTab === 'rfp' && 'Active solicitations and procurement opportunities in Missoula County'}
-            {activeTab === 'projects' && 'Strategic districts, future projects, and development opportunities'}
-            {activeTab === 'asana' && `${submittedLeads.length} pursuit${submittedLeads.length !== 1 ? 's' : ''} tracked in Asana`}
-            {activeTab === 'notpursued' && `${notPursuedLeads.length} leads not pursued — historical intelligence`}
-          </p>
-        </div>
+          {/* ── Queue Content Area ── */}
+          <div style={{ flex: 1, overflow: 'auto', padding: '0 20px 20px' }}>
+            {/* Tab header */}
+            <div style={{ padding: '16px 0 12px', position: 'sticky', top: 0, background: '#fff', zIndex: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                <h1 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.03em' }}>
+                  {TABS.find(t => t.id === activeTab)?.label || 'Project Scout'}
+                </h1>
+                <span style={{ fontSize: 11.5, color: '#94a3b8', fontWeight: 400 }}>
+                  {activeTab === 'news' && 'Items that might become opportunities'}
+                  {activeTab === 'rfp' && 'Active solicitations and procurement'}
+                  {activeTab === 'projects' && 'Districts, named projects, and capital signals'}
+                  {activeTab === 'asana' && `${submittedLeads.length} tracked`}
+                  {activeTab === 'notpursued' && `${notPursuedLeads.length} archived`}
+                </span>
+              </div>
+            </div>
 
-        {/* v4-b28: News tab — BD continuity + semantic linking */}
+        {/* v4-b35: Queue-based content */}
         {activeTab === 'news' && (() => {
           // ── Gather leads ──
           const allNews = leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l));
@@ -8942,125 +8974,47 @@ export default function ProjectScout() {
           );
         })()}
 
-        {/* v4-b22: RFP / RFQ tab — clean active solicitations */}
+        {/* v4-b35: RFP / RFQ — queue rows */}
         {activeTab === 'rfp' && (() => {
-          const rfpLeads = leads.filter(l => getLeadTab(l) === 'rfp' && isMissoulaLead(l));
+          const rfpLeads = leads.filter(l => getLeadTab(l) === 'rfp' && isMissoulaLead(l)).sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
           return rfpLeads.length > 0 ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 14 }}>
-              {rfpLeads.map(lead => (
-                <LeadCard key={lead.id} lead={lead} onClick={() => handleSelectLead(lead)}
-                  batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
-                />
-              ))}
-            </div>
+            <div><QueueHeader />{rfpLeads.map(l => <QueueRow key={l.id} lead={l} isSelected={selectedLead?.id === l.id} onClick={() => handleSelectLead(l)} />)}</div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
-              <FileText size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
-              <p style={{ fontSize: 14, fontWeight: 600 }}>No active solicitations</p>
-              <p style={{ fontSize: 12 }}>Run a scan to find active RFPs, RFQs, and bid opportunities in Missoula County</p>
-            </div>
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}><FileText size={20} style={{ color: '#d1d5db', marginBottom: 6 }} /><p style={{ fontSize: 13, fontWeight: 600 }}>No active solicitations</p><p style={{ fontSize: 11 }}>Run a scan to populate</p></div>
           );
         })()}
 
-        {/* v4-b22: Potential Projects tab — districts, named projects, budget signals */}
+        {/* v4-b35: Potential Projects — queue rows */}
         {activeTab === 'projects' && (() => {
-          const projectLeads = leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l));
-          // Sub-classify
-          const districts = projectLeads.filter(l =>
-            l.watchCategory === 'tif_district' || l.watchCategory === 'redevelopment_area' ||
-            l.leadClass === 'strategic_watch' ||
-            /\b(urd|tedd|urban\s+renewal|district)\b/i.test(l.title || '')
-          );
-          const budget = projectLeads.filter(l =>
-            !districts.includes(l) && (/^budget\s/i.test(l.title || '') || l.watchCategory === 'capital_budget')
-          );
-          const named = projectLeads.filter(l => !districts.includes(l) && !budget.includes(l));
-
-          return (
-            <div>
-              {/* Strategic Districts */}
-              {districts.length > 0 && (
-                <div style={{ marginBottom: 28 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <Target size={14} style={{ color: '#7c3aed' }} />
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Strategic Districts</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: '#ede9fe', color: '#7c3aed' }}>{districts.length}</span>
-                    <div style={{ flex: 1, height: 1, background: '#e9d5ff' }} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
-                    {districts.map(lead => (
-                      <LeadCard key={lead.id} lead={lead} onClick={() => handleSelectLead(lead)}
-                        batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
-                        style={{ borderLeft: '3px solid #7c3aed' }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Named Projects */}
-              {named.length > 0 && (
-                <div style={{ marginBottom: 28 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <MapPin size={14} style={{ color: '#1d4ed8' }} />
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Named Projects</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: '#dbeafe', color: '#1d4ed8' }}>{named.length}</span>
-                    <div style={{ flex: 1, height: 1, background: '#93c5fd' }} />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
-                    {named.map(lead => (
-                      <LeadCard key={lead.id} lead={lead} onClick={() => handleSelectLead(lead)}
-                        batchMode={batchMode} batchSelected={batchSelected} onBatchToggle={toggleBatchSelect}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Budget / CIP Signals */}
-              {budget.length > 0 && (
-                <div style={{ marginBottom: 28 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <DollarSign size={14} style={{ color: '#b45309' }} />
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Budget / CIP Signals</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: '#fef3c7', color: '#b45309' }}>{budget.length}</span>
-                    <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {budget.map(lead => (
-                      <div key={lead.id} onClick={() => handleSelectLead(lead)} style={{
-                        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#fff',
-                        borderRadius: 8, border: '1px solid #f1f5f9', cursor: 'pointer', transition: 'all 0.15s',
-                      }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = '#fde68a'; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = '#f1f5f9'; }}
-                      >
-                        <DollarSign size={12} style={{ color: '#b45309', flexShrink: 0 }} />
-                        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cleanHtmlEntities(lead.title)}</span>
-                        {lead.potentialBudget && <span style={{ fontSize: 11, fontWeight: 600, color: '#b45309', flexShrink: 0 }}>{lead.potentialBudget}</span>}
-                        <ScoreRing score={lead.relevanceScore || 0} size={28} strokeWidth={2.5} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {projectLeads.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
-                  <Target size={24} style={{ color: '#d1d5db', marginBottom: 8 }} />
-                  <p style={{ fontSize: 14, fontWeight: 600 }}>No potential projects yet</p>
-                  <p style={{ fontSize: 12 }}>Run a scan to find strategic districts, development opportunities, and future projects</p>
-                </div>
-              )}
-            </div>
+          const projectLeads = leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l)).sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+          return projectLeads.length > 0 ? (
+            <div><QueueHeader />{projectLeads.map(l => <QueueRow key={l.id} lead={l} isSelected={selectedLead?.id === l.id} onClick={() => handleSelectLead(l)} />)}</div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}><Target size={20} style={{ color: '#d1d5db', marginBottom: 6 }} /><p style={{ fontSize: 13, fontWeight: 600 }}>No potential projects yet</p><p style={{ fontSize: 11 }}>Run a scan to populate</p></div>
           );
         })()}
 
-        {/* Asana tabs — preserved from existing components */}
+        {/* Asana tabs */}
         {activeTab === 'asana' && <SubmittedTab leads={submittedLeads} onSelectLead={handleSelectLead} onImport={() => setShowAsanaImport(true)} />}
         {activeTab === 'notpursued' && <NotPursuedTab leads={notPursuedLeads} submittedLeads={submittedLeads} onSelectLead={handleSelectLead} onRestore={restoreFromNotPursued} />}
-        {/* Admin tabs moved to collapsible admin panel above */}
-        </section>
+          </div>{/* end queue content scroll area */}
+        </div>{/* end left queue panel */}
+
+        {/* ═══ RIGHT: Persistent Detail Pane ═══ */}
+        {selectedLead && (
+          <div style={{ flex: '0 0 50%', maxWidth: '50%', height: '100%', overflow: 'auto', background: '#fff', borderLeft: '1px solid #e2e8f0' }}>
+            <LeadDetail
+              lead={selectedLead}
+              onClose={handleCloseLead}
+              onUpdate={updateLead}
+              onMoveToNotPursued={(id) => setShowNotPursuedDialog(id)}
+              onSubmitToAsana={(lead) => setShowPIFReview(lead)}
+              onRestore={restoreFromNotPursued}
+              onTriageAction={handleTriageAction}
+              onLinkToAsana={(lead) => setShowLinkToAsana(lead)}
+            />
+          </div>
+        )}
       </main>
 
       {/* v4-b12: Batch triage floating action bar */}
@@ -9088,22 +9042,7 @@ export default function ProjectScout() {
         </div>
       )}
 
-      {/* ─── LEAD DETAIL OVERLAY ─── */}
-      {selectedLead && (
-        <>
-          <div onClick={handleCloseLead} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999 }} />
-          <LeadDetail
-            lead={selectedLead}
-            onClose={handleCloseLead}
-            onUpdate={updateLead}
-            onMoveToNotPursued={(id) => setShowNotPursuedDialog(id)}
-            onSubmitToAsana={(lead) => setShowPIFReview(lead)}
-            onRestore={restoreFromNotPursued}
-            onTriageAction={handleTriageAction}
-            onLinkToAsana={(lead) => setShowLinkToAsana(lead)}
-          />
-        </>
-      )}
+      {/* Detail pane is now persistent inside <main> — no overlay needed */}
 
       {/* ─── ADD LEAD MODAL ─── */}
       {showAddLead && <AddLeadModal onSave={addLead} onClose={() => setShowAddLead(false)} />}
