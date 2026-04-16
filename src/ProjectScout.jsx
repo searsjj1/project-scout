@@ -5278,6 +5278,115 @@ function isMissoulaLead(lead) {
 }
 
 /**
+ * v4-b29: Scan-driven weekly brief auto-publish.
+ * Called after mergeEngineResults completes. Reads current leads from localStorage,
+ * computes the weekly brief snapshot, and saves it if the current ISO week has no
+ * snapshot yet. This ensures the brief is published after every successful scan,
+ * regardless of whether the user has opened the News tab.
+ *
+ * Module-level so it can be called from the mergeEngineResults callback (inside the
+ * component) and also from the News tab IIFE (for display).
+ */
+const BRIEF_STORAGE_KEY = 'ps_news_brief_archive';
+
+function computeISOWeekId(timestamp) {
+  const DAY = 86400000;
+  const dt = new Date(timestamp); dt.setHours(0, 0, 0, 0);
+  dt.setDate(dt.getDate() + 3 - ((dt.getDay() + 6) % 7));
+  const jan4 = new Date(dt.getFullYear(), 0, 4);
+  const wk = 1 + Math.round(((dt - jan4) / DAY + (jan4.getDay() + 6) % 7 - 3) / 7);
+  return `${dt.getFullYear()}-W${String(wk).padStart(2, '0')}`;
+}
+
+function computeWeekLabel(timestamp) {
+  const dt = new Date(timestamp); dt.setHours(0, 0, 0, 0);
+  const dayOfWeek = (dt.getDay() + 6) % 7;
+  const monday = new Date(dt); monday.setDate(dt.getDate() - dayOfWeek);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `Week of ${fmt(monday)} – ${fmt(sunday)}, ${monday.getFullYear()}`;
+}
+
+function autoPublishWeeklyBrief(triggerSource = 'scan') {
+  try {
+    const DAY = 86400000;
+    const now = Date.now();
+    const currentWeekId = computeISOWeekId(now);
+
+    // Load archive
+    let archive;
+    try { archive = JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || '[]'); } catch { archive = []; }
+
+    // Check if this week already has a snapshot
+    const existing = archive.find(s => s.weekId === currentWeekId);
+    if (existing) {
+      console.log(`[Brief Auto-Publish] ${currentWeekId} already published — skipping (trigger: ${triggerSource})`);
+      return false;
+    }
+
+    // Load current leads
+    let leads;
+    try { leads = JSON.parse(localStorage.getItem('ps_leads') || '[]'); } catch { leads = []; }
+    if (leads.length === 0) {
+      console.log('[Brief Auto-Publish] No leads — skipping');
+      return false;
+    }
+
+    // Compute the brief data
+    const allNews = leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l));
+    const allProjects = leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l));
+    const allItems = [...allNews, ...allProjects];
+    const getItemDate = (l) => {
+      const d = l.originalSignalDate || l.emailDate || l.dateDiscovered || l.dateAdded || l.lastCheckedDate;
+      return d ? new Date(d).getTime() : 0;
+    };
+    const within7d = allItems.filter(l => (now - getItemDate(l)) <= 7 * DAY);
+    const within30d = allItems.filter(l => (now - getItemDate(l)) <= 30 * DAY);
+
+    if (within7d.length === 0 && within30d.length === 0) {
+      console.log('[Brief Auto-Publish] No items in 7d or 30d window — skipping');
+      return false;
+    }
+
+    // Build a lightweight narrative (simplified version for auto-publish)
+    const high7d = within7d.filter(l => l.projectPotential === 'high');
+    const med7d = within7d.filter(l => l.projectPotential === 'medium');
+    const signalCount = high7d.length + med7d.length;
+    let narrative = signalCount > 0
+      ? `${signalCount} project-relevant signal${signalCount !== 1 ? 's' : ''} in the last 7 days.`
+      : `${within7d.length} item${within7d.length !== 1 ? 's' : ''} scanned in the last 7 days.`;
+    if (high7d.length > 0) {
+      const names = high7d.slice(0, 3).map(l => l.title);
+      narrative += ` Key: ${names.join(', ')}.`;
+    }
+
+    const snapshot = {
+      date: new Date().toISOString(),
+      weekId: currentWeekId,
+      weekLabel: computeWeekLabel(now),
+      titles7d: within7d.map(l => l.title || ''),
+      titles30d: within30d.map(l => l.title || ''),
+      high: high7d.length,
+      med: med7d.length,
+      total7d: within7d.length,
+      total30d: within30d.length,
+      narrative7d: narrative,
+      trigger: triggerSource,
+    };
+
+    // Save — replace same-week entry, keep last 8
+    const others = archive.filter(s => s.weekId !== currentWeekId);
+    const updated = [...others.slice(-7), snapshot];
+    localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(updated));
+    console.log(`[Brief Auto-Publish] Published ${currentWeekId} (${within7d.length} items, ${high7d.length} high) — trigger: ${triggerSource}`);
+    return true;
+  } catch (e) {
+    console.warn('[Brief Auto-Publish] Error:', e);
+    return false;
+  }
+}
+
+/**
  * Board quality re-evaluation — prunes weak/noisy existing leads.
  * Applies the same quality gates to existing leads that are applied to new candidates.
  * This is the critical missing piece: without this, leads admitted under old/weaker rules
@@ -7996,6 +8105,16 @@ export default function ProjectScout() {
         }
       } catch (e) { console.warn('[Source Health] Update failed:', e); }
     }
+
+    // v4-b29: Auto-publish weekly brief after successful scan
+    // Runs after leads have been merged into localStorage, so it can read the fresh state.
+    // Uses a setTimeout(0) to ensure the React setState batches have flushed to localStorage.
+    setTimeout(() => {
+      const published = autoPublishWeeklyBrief('scan');
+      if (published) {
+        console.log('[mergeEngineResults] Weekly brief auto-published after scan');
+      }
+    }, 100);
   }, [setLeads]);
 
   // ─── Watch Triage Actions ──────────────────────────────────
@@ -8382,64 +8501,23 @@ export default function ProjectScout() {
             return parts.join(' ');
           };
 
-          // ═══ BRIEF ARCHIVE / CONTINUITY (v4-b29: auto-publish cadence) ═══
-          const BRIEF_STORAGE_KEY = 'ps_news_brief_archive';
+          // ═══ BRIEF ARCHIVE / CONTINUITY (v4-b29: scan-driven auto-publish) ═══
+          // Uses module-level BRIEF_STORAGE_KEY, computeISOWeekId, computeWeekLabel, autoPublishWeeklyBrief
           const loadArchive = () => { try { return JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || '[]'); } catch { return []; } };
+          const currentWeekId = computeISOWeekId(Date.now());
+          const weekLabel = computeWeekLabel(Date.now());
 
-          // Week identifier: ISO week number + year (e.g., "2026-W16")
-          const getWeekId = (d) => {
-            const dt = new Date(d); dt.setHours(0, 0, 0, 0);
-            dt.setDate(dt.getDate() + 3 - ((dt.getDay() + 6) % 7));
-            const jan4 = new Date(dt.getFullYear(), 0, 4);
-            const wk = 1 + Math.round(((dt - jan4) / DAY + (jan4.getDay() + 6) % 7 - 3) / 7);
-            return `${dt.getFullYear()}-W${String(wk).padStart(2, '0')}`;
-          };
-          const currentWeekId = getWeekId(Date.now());
-          const weekLabel = (() => {
-            const dt = new Date(); dt.setHours(0, 0, 0, 0);
-            const dayOfWeek = (dt.getDay() + 6) % 7; // 0=Mon
-            const monday = new Date(dt); monday.setDate(dt.getDate() - dayOfWeek);
-            const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-            const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            return `Week of ${fmt(monday)} – ${fmt(sunday)}, ${monday.getFullYear()}`;
-          })();
-
-          // Build a snapshot (reusable for auto + manual publish)
-          const buildSnapshot = () => ({
-            date: new Date().toISOString(),
-            weekId: currentWeekId,
-            weekLabel,
-            titles7d: within7d.map(l => l.title || ''),
-            titles30d: within30d.map(l => l.title || ''),
-            high: within7d.filter(l => l.projectPotential === 'high').length,
-            med: within7d.filter(l => l.projectPotential === 'medium').length,
-            total7d: within7d.length,
-            total30d: within30d.length,
-            narrative7d: generateNarrative(sortItems(within7d), 'last 7 days'),
-          });
-
-          // Save snapshot to archive (max 8 weekly entries)
-          const saveSnapshot = (snapshot, existingArchive) => {
-            // Replace same-week entry if present, otherwise append
-            const others = existingArchive.filter(s => s.weekId !== snapshot.weekId);
-            const updated = [...others.slice(-7), snapshot];
-            try { localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(updated)); } catch {}
-            return updated;
-          };
-
-          // Load archive + auto-publish logic
+          // Load archive — scan-driven auto-publish already runs after mergeEngineResults,
+          // but also auto-publish on News-tab visit as a fallback (in case no scan has run yet this week)
           let archive = loadArchive();
           const thisWeekBrief = archive.find(s => s.weekId === currentWeekId);
+          if (!thisWeekBrief && within7d.length > 0) {
+            autoPublishWeeklyBrief('news-tab');
+            archive = loadArchive(); // reload after publish
+          }
+
           const priorWeekBriefs = archive.filter(s => s.weekId && s.weekId < currentWeekId).sort((a, b) => b.weekId.localeCompare(a.weekId));
           const priorBrief = priorWeekBriefs.length > 0 ? priorWeekBriefs[0] : null;
-
-          // Auto-publish: if this week has no snapshot yet AND we have items, publish automatically
-          let autoPublished = false;
-          if (!thisWeekBrief && within7d.length > 0) {
-            const snap = buildSnapshot();
-            archive = saveSnapshot(snap, archive);
-            autoPublished = true;
-          }
 
           // Determine the "comparison target" for continuity:
           // Compare live data against the PRIOR WEEK's brief (not this week's, since this week is current)
@@ -8461,11 +8539,22 @@ export default function ProjectScout() {
           const liveTitles7d = within7d.map(l => (l.title || '').toLowerCase().trim()).sort().join('|');
           const pubTitles7d = (publishedThisWeek?.titles7d || []).map(t => t.toLowerCase().trim()).sort().join('|');
           const hasLiveChanges = publishedThisWeek && liveTitles7d !== pubTitles7d;
+          const publishTrigger = publishedThisWeek?.trigger || 'unknown';
 
-          // Manual re-publish (updates this week's snapshot)
+          // Manual re-publish (updates this week's snapshot with full narrative)
           const republishBrief = () => {
-            const snap = buildSnapshot();
-            archive = saveSnapshot(snap, archive);
+            const snap = {
+              date: new Date().toISOString(), weekId: currentWeekId, weekLabel,
+              titles7d: within7d.map(l => l.title || ''), titles30d: within30d.map(l => l.title || ''),
+              high: within7d.filter(l => l.projectPotential === 'high').length,
+              med: within7d.filter(l => l.projectPotential === 'medium').length,
+              total7d: within7d.length, total30d: within30d.length,
+              narrative7d: generateNarrative(sortItems(within7d), 'last 7 days'),
+              trigger: 'manual',
+            };
+            const others = archive.filter(s => s.weekId !== currentWeekId);
+            const updated = [...others.slice(-7), snap];
+            try { localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(updated)); } catch {}
           };
 
           // ═══ SYNOPSIS BUILDER ═══
@@ -8617,15 +8706,14 @@ export default function ProjectScout() {
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500 }}>{weekLabel}</span>
                   {publishedThisWeek && !hasLiveChanges && (
-                    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontWeight: 600 }}>Published</span>
+                    <span title={`Published via ${publishTrigger}`} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontWeight: 600 }}>
+                      {publishTrigger === 'scan' ? 'Published after scan' : publishTrigger === 'news-tab' ? 'Auto-published' : 'Published'}
+                    </span>
                   )}
                   {publishedThisWeek && hasLiveChanges && (
                     <button onClick={() => { republishBrief(); window.location.reload(); }} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 600, cursor: 'pointer' }}>
-                      Updated — Republish
+                      Updated since {publishTrigger === 'scan' ? 'scan' : 'publish'} — Republish
                     </button>
-                  )}
-                  {!publishedThisWeek && within7d.length > 0 && (
-                    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', fontWeight: 600 }}>Auto-published</span>
                   )}
                 </div>
               </div>
