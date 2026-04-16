@@ -16,7 +16,133 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.23-20260415-news-highlights-b26';
+const SCAN_BUILD_ID = 'scan-v4.24-20260416-shared-brief-b29';
+
+// ── v4-b29: Server-side weekly brief publish (to Upstash Redis) ─────
+// Computes a weekly brief snapshot from the scan's lead corpus and stores it
+// in the same Upstash Redis that store.js uses, so any browser can read it.
+
+const BRIEF_REDIS_KEY = 'ps_news_brief_archive';
+
+function serverComputeWeekId(timestamp) {
+  const DAY = 86400000;
+  const dt = new Date(timestamp); dt.setHours(0, 0, 0, 0);
+  dt.setDate(dt.getDate() + 3 - ((dt.getDay() + 6) % 7));
+  const jan4 = new Date(dt.getFullYear(), 0, 4);
+  const wk = 1 + Math.round(((dt - jan4) / DAY + (jan4.getDay() + 6) % 7 - 3) / 7);
+  return `${dt.getFullYear()}-W${String(wk).padStart(2, '0')}`;
+}
+
+function serverComputeWeekLabel(timestamp) {
+  const dt = new Date(timestamp); dt.setHours(0, 0, 0, 0);
+  const dayOfWeek = (dt.getDay() + 6) % 7;
+  const mon = new Date(dt); mon.setDate(dt.getDate() - dayOfWeek);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `Week of ${fmt(mon)} – ${fmt(sun)}, ${mon.getFullYear()}`;
+}
+
+async function serverPublishWeeklyBrief(addedLeads, existingLeads, log) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) { log('  ⚠ Brief publish skipped — no Upstash configured'); return null; }
+
+  const DAY = 86400000;
+  const now = Date.now();
+  const weekId = serverComputeWeekId(now);
+  const weekLabel = serverComputeWeekLabel(now);
+
+  // Read current archive from Redis
+  let archive = [];
+  try {
+    const getResp = await fetch(`${url}/get/${encodeURIComponent(BRIEF_REDIS_KEY)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (getResp.ok) {
+      const d = await getResp.json();
+      if (d.result) {
+        let parsed = JSON.parse(d.result);
+        if (typeof parsed === 'string') try { parsed = JSON.parse(parsed); } catch {}
+        if (Array.isArray(parsed)) archive = parsed;
+      }
+    }
+  } catch {}
+
+  // Check if this week already published
+  const existing = archive.find(s => s.weekId === weekId);
+  if (existing) { log(`  Brief: ${weekId} already published — skipping`); return null; }
+
+  // Build the brief from the combined lead corpus (existing + newly added)
+  const allLeads = [...(existingLeads || []), ...(addedLeads || [])];
+  // Simple lead-tab classification (mirrors frontend getLeadTab)
+  const isNews = (l) => {
+    if (l.leadClass === 'active_solicitation' || l.status === 'active') return false;
+    if (l.dashboard_lane === 'news') return true;
+    if (/news|media/i.test(l.sourceName || '')) return true;
+    return false;
+  };
+  const isProject = (l) => !isNews(l) && l.status !== 'active' && l.leadClass !== 'active_solicitation';
+
+  const newsLeads = allLeads.filter(isNews);
+  const projectLeads = allLeads.filter(isProject);
+  const allItems = [...newsLeads, ...projectLeads];
+
+  const getItemDate = (l) => {
+    const d = l.originalSignalDate || l.emailDate || l.dateDiscovered || l.dateAdded || l.lastCheckedDate;
+    return d ? new Date(d).getTime() : 0;
+  };
+  const within7d = allItems.filter(l => (now - getItemDate(l)) <= 7 * DAY);
+  const within30d = allItems.filter(l => (now - getItemDate(l)) <= 30 * DAY);
+
+  if (within7d.length === 0 && within30d.length === 0) {
+    log('  Brief: no items in 7d/30d window — skipping');
+    return null;
+  }
+
+  const high = within7d.filter(l => l.projectPotential === 'high');
+  const med = within7d.filter(l => l.projectPotential === 'medium');
+  const signalCount = high.length + med.length;
+
+  let narrative = signalCount > 0
+    ? `${signalCount} project-relevant signal${signalCount !== 1 ? 's' : ''} in the last 7 days.`
+    : `${within7d.length} item${within7d.length !== 1 ? 's' : ''} scanned in the last 7 days.`;
+  if (high.length > 0) {
+    narrative += ` Key: ${high.slice(0, 3).map(l => l.title).join(', ')}.`;
+  }
+  const budgetLeads = within7d.filter(l => l.potentialBudget);
+  if (budgetLeads.length > 0) narrative += ` Funding: ${budgetLeads[0].potentialBudget} for ${budgetLeads[0].title}.`;
+
+  const snapshot = {
+    date: new Date().toISOString(),
+    weekId,
+    weekLabel,
+    titles7d: within7d.map(l => l.title || ''),
+    titles30d: within30d.map(l => l.title || ''),
+    high: high.length,
+    med: med.length,
+    total7d: within7d.length,
+    total30d: within30d.length,
+    narrative7d: narrative,
+    trigger: 'server-scan',
+    scanBuildId: SCAN_BUILD_ID,
+  };
+
+  // Save — replace same-week, keep last 8
+  const others = archive.filter(s => s.weekId !== weekId);
+  const updated = [...others.slice(-7), snapshot];
+
+  try {
+    const setResp = await fetch(`${url}/set/${encodeURIComponent(BRIEF_REDIS_KEY)}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
+      body: JSON.stringify(updated),
+    });
+    if (!setResp.ok) { log(`  ⚠ Brief Redis SET failed: ${setResp.status}`); return null; }
+  } catch (e) { log(`  ⚠ Brief Redis error: ${e.message}`); return null; }
+
+  log(`  ✓ Brief published: ${weekId} (${within7d.length} items, ${high.length} high) — server-scan`);
+  return snapshot;
+}
 
 // ── V4: SOURCE PROFILE ENGINE ─────────────────────────────────
 // Each source has a profile that controls how the scan engine reads it.
@@ -6511,6 +6637,20 @@ export default async function handler(req, res) {
     log(`Quality gates: ${totalBlocked} blocked total — ${skipGenericTitle} generic-title, ${skipPortalTitle} portal/procurement-only, ${skipWeakAEFit} weak-A&E, ${skipInfraOnly} infra-only, ${skipNotProjectSpecific} not-project-specific`);
 
     lastRun = { action, ok: true, ts: new Date().toISOString(), added: added.length, updated: updated.length, dur };
+
+    // ── v4-b29: Server-side weekly brief auto-publish ──
+    // After a successful scan, compute and publish the weekly brief snapshot to shared storage.
+    // Uses the same Upstash Redis that store.js uses, so the frontend can fetch it.
+    try {
+      const briefPublished = await serverPublishWeeklyBrief(added, existingLeads || [], log);
+      if (briefPublished) {
+        results.briefPublished = true;
+        results.briefWeekId = briefPublished.weekId;
+      }
+    } catch (briefErr) {
+      log(`⚠ Brief auto-publish error: ${briefErr.message}`);
+    }
+
     return res.status(200).json({ ok: true, action, results, logs, ts: new Date().toISOString(), scanBuildId: SCAN_BUILD_ID });
 
   } catch (err) {

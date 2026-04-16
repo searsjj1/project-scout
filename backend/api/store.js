@@ -21,7 +21,7 @@
  *   GET  ?action=export       → Export all lead-state records
  */
 
-const STORE_BUILD_ID = 'store-v1.0-20260321';
+const STORE_BUILD_ID = 'store-v1.1-20260416-shared-brief';
 
 // ── Allowed keys (only lead-state records, not settings/config) ──
 const ALLOWED_KEYS = new Set([
@@ -30,6 +30,7 @@ const ALLOWED_KEYS = new Set([
   'ps_notpursued',
   'ps_pruning_review_queue',
   'ps_prune_memory',
+  'ps_news_brief_archive', // v4-b29: shared weekly BD briefing archive
 ]);
 
 // ── Upstash Redis REST client (zero deps, pure fetch) ──

@@ -6835,6 +6835,33 @@ export default function ProjectScout() {
   const [activeTab, setActiveTab] = useState('rfp');
   // v4-b26: News sub-section navigation (executive brief / project-relevant / all-source)
   const [newsSection, setNewsSection] = useState('brief');
+  // v4-b29: Shared brief archive — fetched from server (Upstash Redis), with local fallback
+  const [sharedBriefArchive, setSharedBriefArchive] = useState(null); // null = loading, [] = loaded empty
+  const sharedBriefFetched = useRef(false);
+  useEffect(() => {
+    if (sharedBriefFetched.current) return;
+    sharedBriefFetched.current = true;
+    (async () => {
+      try {
+        const settings = JSON.parse(localStorage.getItem('ps_settings') || '{}');
+        const backend = (settings.backendEndpoint || '').replace(/\/+$/, '');
+        if (!backend) { setSharedBriefArchive([]); return; }
+        const resp = await fetch(`${backend}/api/store?action=get&key=ps_news_brief_archive`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.ok && Array.isArray(data.value) && data.value.length > 0) {
+            setSharedBriefArchive(data.value);
+            // Also update localStorage as cache
+            try { localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(data.value)); } catch {}
+            console.log(`[Shared Brief] Loaded ${data.value.length} archived brief(s) from server`);
+            return;
+          }
+        }
+      } catch (e) { console.log('[Shared Brief] Server fetch failed, using local:', e.message); }
+      // Fallback to localStorage
+      setSharedBriefArchive([]);
+    })();
+  }, []);
   // v4-tabfix: hard-guarantee real-tab behavior. If activeTab somehow ends up
   // outside the canonical TABS list (e.g. stale 'active' / 'overview' from older
   // builds), snap it back to 'rfp' so the main panel never renders blank.
@@ -8501,19 +8528,22 @@ export default function ProjectScout() {
             return parts.join(' ');
           };
 
-          // ═══ BRIEF ARCHIVE / CONTINUITY (v4-b29: scan-driven auto-publish) ═══
-          // Uses module-level BRIEF_STORAGE_KEY, computeISOWeekId, computeWeekLabel, autoPublishWeeklyBrief
-          const loadArchive = () => { try { return JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || '[]'); } catch { return []; } };
+          // ═══ BRIEF ARCHIVE / CONTINUITY (v4-b29: shared server-backed archive) ═══
+          const loadLocalArchive = () => { try { return JSON.parse(localStorage.getItem(BRIEF_STORAGE_KEY) || '[]'); } catch { return []; } };
           const currentWeekId = computeISOWeekId(Date.now());
           const weekLabel = computeWeekLabel(Date.now());
 
-          // Load archive — scan-driven auto-publish already runs after mergeEngineResults,
-          // but also auto-publish on News-tab visit as a fallback (in case no scan has run yet this week)
-          let archive = loadArchive();
+          // Use shared archive from server if available, otherwise local
+          const serverArchive = sharedBriefArchive;
+          let archive = (serverArchive && serverArchive.length > 0) ? serverArchive : loadLocalArchive();
+          const briefSource = (serverArchive && serverArchive.length > 0) ? 'server' : 'local';
+
+          // If this week has no snapshot yet and we have data, publish locally as fallback
+          // (The real publish happens server-side after scan — this is only for when no scan has run)
           const thisWeekBrief = archive.find(s => s.weekId === currentWeekId);
           if (!thisWeekBrief && within7d.length > 0) {
             autoPublishWeeklyBrief('news-tab');
-            archive = loadArchive(); // reload after publish
+            archive = loadLocalArchive();
           }
 
           const priorWeekBriefs = archive.filter(s => s.weekId && s.weekId < currentWeekId).sort((a, b) => b.weekId.localeCompare(a.weekId));
@@ -8541,7 +8571,7 @@ export default function ProjectScout() {
           const hasLiveChanges = publishedThisWeek && liveTitles7d !== pubTitles7d;
           const publishTrigger = publishedThisWeek?.trigger || 'unknown';
 
-          // Manual re-publish (updates this week's snapshot with full narrative)
+          // Manual re-publish (updates this week's snapshot — pushes to server + local)
           const republishBrief = () => {
             const snap = {
               date: new Date().toISOString(), weekId: currentWeekId, weekLabel,
@@ -8555,6 +8585,17 @@ export default function ProjectScout() {
             const others = archive.filter(s => s.weekId !== currentWeekId);
             const updated = [...others.slice(-7), snap];
             try { localStorage.setItem(BRIEF_STORAGE_KEY, JSON.stringify(updated)); } catch {}
+            // Also push to shared server store
+            try {
+              const settings = JSON.parse(localStorage.getItem('ps_settings') || '{}');
+              const backend = (settings.backendEndpoint || '').replace(/\/+$/, '');
+              if (backend) {
+                fetch(`${backend}/api/store?action=set`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ key: 'ps_news_brief_archive', value: updated }),
+                }).catch(() => {});
+              }
+            } catch {}
           };
 
           // ═══ SYNOPSIS BUILDER ═══
@@ -8706,13 +8747,14 @@ export default function ProjectScout() {
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500 }}>{weekLabel}</span>
                   {publishedThisWeek && !hasLiveChanges && (
-                    <span title={`Published via ${publishTrigger}`} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontWeight: 600 }}>
-                      {publishTrigger === 'scan' ? 'Published after scan' : publishTrigger === 'news-tab' ? 'Auto-published' : 'Published'}
+                    <span title={`Published via ${publishTrigger} (${briefSource})`} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: publishTrigger === 'server-scan' ? '#dbeafe' : '#f0fdf4', color: publishTrigger === 'server-scan' ? '#1e40af' : '#166534', border: `1px solid ${publishTrigger === 'server-scan' ? '#93c5fd' : '#bbf7d0'}`, fontWeight: 600 }}>
+                      {publishTrigger === 'server-scan' ? 'Published by server scan' : publishTrigger === 'scan' ? 'Published after scan' : publishTrigger === 'news-tab' ? 'Auto-published' : 'Published'}
                     </span>
                   )}
+                  {briefSource === 'server' && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', fontWeight: 600 }}>SHARED</span>}
                   {publishedThisWeek && hasLiveChanges && (
                     <button onClick={() => { republishBrief(); window.location.reload(); }} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 600, cursor: 'pointer' }}>
-                      Updated since {publishTrigger === 'scan' ? 'scan' : 'publish'} — Republish
+                      Updated since {publishTrigger === 'server-scan' ? 'server scan' : 'publish'} — Republish
                     </button>
                   )}
                 </div>
