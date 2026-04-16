@@ -6153,7 +6153,7 @@ export default function ProjectScout() {
   // Syncs lead-state records to a shared server-side store (Upstash Redis via Vercel)
   // so they are not trapped in one browser's localStorage.
   // Falls back gracefully to local-only if the shared store is unavailable.
-  const SHARED_KEYS = new Set(['leads', 'submitted', 'notpursued', 'pruning_review_queue', 'prune_memory']);
+  const SHARED_KEYS = new Set(['leads', 'submitted', 'notpursued', 'pruning_review_queue', 'prune_memory', 'sources', 'taxonomy']);
   const [sharedStoreStatus, setSharedStoreStatus] = useState('checking'); // 'checking' | 'connected' | 'local-only' | 'error'
   const sharedSyncTimers = useRef({});
   const sharedStoreUrl = useRef(null);

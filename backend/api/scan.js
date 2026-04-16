@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.25-20260416-full-corpus-brief-b30';
+const SCAN_BUILD_ID = 'scan-v4.26-20260416-server-daily-scan-b31';
 
 // ── v4-b29: Server-side weekly brief publish (to Upstash Redis) ─────
 // Computes a weekly brief snapshot from the scan's lead corpus and stores it
@@ -5201,9 +5201,261 @@ export default async function handler(req, res) {
   const log = m => { logs.push(m); console.log(`[PS] ${m}`); };
 
   try {
-    // ── STATUS ──────────────────────────────────────────────
-    if (req.method === 'GET' || action === 'status') {
+    // ── STATUS (GET with no action or explicit status) ──────
+    if (req.method === 'GET' && (action === 'status' || !req.query?.action)) {
       return res.status(200).json({ ok: true, lastRun, time: new Date().toISOString(), version: '1.0.0', scanBuildId: SCAN_BUILD_ID });
+    }
+
+    // ── v4-b30: SERVER-SIDE DAILY SCAN (GET ?action=daily) ──
+    // Triggered by Vercel cron. Reads sources + leads from Upstash Redis,
+    // runs a real scan, merges results back to shared storage, publishes brief.
+    if (req.method === 'GET' && action === 'daily') {
+      const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+      const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+      if (!redisUrl || !redisToken) {
+        log('⚠ Server-side daily scan: no Upstash configured — cannot run without shared storage');
+        return res.status(200).json({ ok: false, error: 'Upstash not configured', logs, scanBuildId: SCAN_BUILD_ID, ts: new Date().toISOString() });
+      }
+
+      // Helper: read from Upstash
+      const redisGet = async (key) => {
+        try {
+          const r = await fetch(`${redisUrl}/get/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${redisToken}` } });
+          if (!r.ok) return null;
+          const d = await r.json();
+          if (!d.result) return null;
+          let parsed = JSON.parse(d.result);
+          if (typeof parsed === 'string') try { parsed = JSON.parse(parsed); } catch {}
+          return parsed;
+        } catch { return null; }
+      };
+      const redisSet = async (key, value) => {
+        try {
+          const r = await fetch(`${redisUrl}/set/${encodeURIComponent(key)}`, {
+            method: 'POST', headers: { Authorization: `Bearer ${redisToken}`, 'Content-Type': 'text/plain' },
+            body: JSON.stringify(value),
+          });
+          return r.ok;
+        } catch { return false; }
+      };
+
+      log('═══ SERVER-SIDE DAILY SCAN ═══');
+      log(`🔧 Backend Build: ${SCAN_BUILD_ID} | Server Time: ${new Date().toISOString()}`);
+
+      // Step 1: Load sources from shared store
+      let sources = await redisGet('ps_sources');
+      if (!Array.isArray(sources) || sources.length === 0) {
+        log('⚠ No sources in shared store (ps_sources) — the frontend must sync sources first');
+        log('  → Open Project Scout in a browser, then run a scan from Settings to sync sources to shared storage');
+        return res.status(200).json({ ok: false, error: 'No sources in shared store. Run a browser-driven scan first to sync sources.', logs, scanBuildId: SCAN_BUILD_ID, ts: new Date().toISOString() });
+      }
+
+      // Filter to active sources only
+      const activeSources = sources.filter(s => s.active !== false);
+      log(`Sources: ${activeSources.length} active of ${sources.length} total from shared store`);
+
+      // Step 2: Load existing leads, not-pursued, submitted from shared store
+      const existingLeads = (await redisGet('ps_leads')) || [];
+      const notPursuedLeads = (await redisGet('ps_notpursued')) || [];
+      const submittedLeads = (await redisGet('ps_submitted')) || [];
+      const taxonomy = (await redisGet('ps_taxonomy')) || [];
+      log(`Shared state: ${existingLeads.length} leads, ${notPursuedLeads.length} not-pursued, ${submittedLeads.length} submitted, ${taxonomy.length} taxonomy`);
+
+      // Step 3: Normalize sources (same logic as POST daily/backfill)
+      const familyCategoryMap = {
+        'SF-01': 'State Procurement', 'SF-02': 'County Commission', 'SF-03': 'County Commission',
+        'SF-04': 'County Commission', 'SF-05': 'Planning & Zoning', 'SF-06': 'Capital Planning',
+        'SF-07': 'Capital Planning', 'SF-08': 'Capital Planning', 'SF-09': 'Economic Development',
+        'SF-10': 'Capital Planning', 'SF-11': 'Capital Planning', 'SF-12': 'Public Safety',
+        'SF-13': 'Capital Planning', 'SF-14': 'State Procurement', 'SF-15': 'Other', 'SF-16': 'Other',
+      };
+      const normalize = (src) => ({
+        ...src,
+        name: src.source_name || src.name || '',
+        url: src.source_url || src.url || '',
+        id: src.source_id || src.id || '',
+        keywords: src.keywords_to_watch || src.keywords || [],
+        category: familyCategoryMap[src.source_family] || src.source_family || src.category || '',
+        priority: src.priority_tier || src.priority || 'medium',
+        organization: src.entity_name || src.organization || src.source_name || src.name || '',
+      });
+      const activeNorm = activeSources.map(normalize);
+      const list = activeNorm.slice(0, 15); // Daily = top 15
+
+      // Step 4: Dedup sets (same as POST path)
+      const allSubmittedTitles = [];
+      for (const s of submittedLeads) {
+        for (const t of [s.title, s.asana_task_name, s.scout_title, s.user_edited_title, ...(s.alternate_titles || [])].filter(Boolean)) {
+          allSubmittedTitles.push(t.toLowerCase().trim());
+        }
+      }
+      const submittedSet = new Set(allSubmittedTitles);
+      const allEx = [...existingLeads, ...notPursuedLeads];
+      const npSet = new Set(notPursuedLeads.map(l => (l.title||'').toLowerCase().trim()));
+      const exSet = new Set([...allEx.map(l => (l.title||'').toLowerCase().trim()), ...allSubmittedTitles]);
+
+      log(`═══ DAILY — ${list.length} of ${activeNorm.length} active sources ═══`);
+
+      // Step 5: Run the scan (reuse the same scan loop as POST path)
+      const added = [], updated = [], suppressed = [];
+      let skipNP = 0, skipDupe = 0, skipLowQuality = 0, fetchOk = 0, fetchFail = 0, parseHits = 0;
+      let skipGenericTitle = 0, skipPortalTitle = 0, skipWeakAEFit = 0, skipInfraOnly = 0, skipNotProjectSpecific = 0;
+      const MIN_BOARD_RELEVANCE_ACTIVE = 35;
+      const MIN_BOARD_RELEVANCE_WATCH = 22;
+      const addedTitles = [];
+      const start = Date.now();
+      const sourceHealthMap = [];
+      const focusPoints = [];
+      const targetOrgs = [];
+      const settings = { freshnessDays: 60 };
+      const freshDays = 60;
+
+      for (let i = 0; i < list.length; i++) {
+        const src = list[i];
+        log(`[${i+1}/${list.length}] ${src.name} (${src.url})`);
+
+        const earlyProfile = getSourceProfile(src);
+
+        // Public notice sources
+        if (earlyProfile.profile_type === 'public_notice') {
+          const noticeResult = await fetchPublicNotices(src, log);
+          sourceHealthMap.push({ sourceId: src.id, status: noticeResult.ok ? 'healthy' : 'failing', error: noticeResult.err || null });
+          if (noticeResult.ok) {
+            fetchOk++;
+            parseHits++;
+            let noticeAdded = 0;
+            for (const notice of noticeResult.notices) {
+              const lead = extractLeadFromNotice(notice, src);
+              if (!lead) continue;
+              const tl = lead.title.toLowerCase().trim();
+              if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
+              const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
+              if (isDupe) { skipDupe++; continue; }
+              if (isGenericNewsHeadline(lead.title)) { skipGenericTitle++; continue; }
+              if (isRetrospectiveTitle(lead.title)) { skipNotProjectSpecific++; continue; }
+              exSet.add(tl); addedTitles.push(lead.title); added.push(lead); noticeAdded++;
+              log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}"`);
+            }
+            log(`  → ${noticeAdded} notice lead(s) added`);
+          } else { fetchFail++; }
+          continue;
+        }
+
+        // Gmail intake
+        if (earlyProfile.profile_type === 'gmail_intake') {
+          const gmailResult = await fetchGmailMessages(src, log);
+          if (gmailResult.unconfigured) { sourceHealthMap.push({ sourceId: src.id, status: 'unconfigured', error: 'Gmail credentials not configured' }); continue; }
+          sourceHealthMap.push({ sourceId: src.id, status: gmailResult.ok ? 'healthy' : 'failing', error: gmailResult.err || null });
+          if (gmailResult.ok) {
+            fetchOk++;
+            if (gmailResult.messages.length > 0) parseHits++;
+            let gmailAdded = 0;
+            for (const email of gmailResult.messages) {
+              const highlights = extractHighlightsFromEmail(email, src, existingLeads);
+              if (highlights.length === 0) { const lead = extractLeadFromEmail(email, src); if (lead) highlights.push(lead); }
+              for (const lead of highlights) {
+                const gmailDupe = added.some(a => a.gmailMessageId === email.id && titleSimilarity(a.title, lead.title) >= 0.65) ||
+                  existingLeads.some(ex => ex.gmailMessageId === email.id && titleSimilarity(ex.title, lead.title) >= 0.65);
+                if (gmailDupe) { skipDupe++; continue; }
+                if (lead._enrichTarget) { delete lead._enrichTarget; }
+                const tl = lead.title.toLowerCase().trim();
+                if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
+                const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
+                if (isDupe) { skipDupe++; continue; }
+                exSet.add(tl); addedTitles.push(lead.title); added.push(lead); gmailAdded++;
+                log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}" | ${lead.projectPotential || '?'} potential`);
+              }
+            }
+            log(`  → ${gmailAdded} highlight(s) added (${gmailResult.messages.length} messages)`);
+          } else { fetchFail++; }
+          continue;
+        }
+
+        // Standard HTTP source fetch
+        if (!src.url) { log('  ⊘ no URL — skipping'); continue; }
+        const f = await fetchUrl(src.url);
+        if (!f.ok) { log(`  ✗ ${f.err||'HTTP '+f.status}`); fetchFail++; sourceHealthMap.push({ sourceId: src.id, status: 'failing', error: f.err || `HTTP ${f.status}` }); continue; }
+        fetchOk++;
+        sourceHealthMap.push({ sourceId: src.id, status: 'healthy', httpStatus: f.status, contentLength: f.length });
+        log(`  ✓ ${f.length} chars — "${f.title||'(no title)'}"`);
+
+        const { pass, n, kw } = preFilter(f.content, src);
+        if (!pass) { log(`  — ${n} keywords (below threshold)`); continue; }
+        parseHits++;
+        log(`  → ${n} keywords: ${kw.slice(0,5).join(', ')}`);
+
+        const childLinks = extractChildLinks(f.rawHtml, src.url);
+        if (childLinks.length > 0) log(`  → ${childLinks.length} child document links found`);
+
+        const srcProfile = getSourceProfile(src);
+        const cands = await extractLeads(f.content, src, kw, focusPoints, targetOrgs, childLinks, log, taxonomy, f.rawHtml||'', srcProfile);
+        log(`  → ${cands.length} candidate(s)`);
+
+        for (const c of cands) {
+          const tl = (c.title||'').toLowerCase().trim();
+          if (npSet.has(tl)) { skipNP++; continue; }
+          if (exSet.has(tl)) { skipDupe++; continue; }
+          const nearDupe = addedTitles.some(at => titleSimilarity(c.title, at) >= 0.65) ||
+            allEx.some(ex => titleSimilarity(c.title, ex.title) >= 0.65);
+          if (nearDupe) { skipDupe++; continue; }
+          if (isGenericNewsHeadline(c.title)) { skipGenericTitle++; continue; }
+          if (isRetrospectiveTitle(c.title)) { skipNotProjectSpecific++; continue; }
+          if (isNavigationJunk(c.title)) { skipGenericTitle++; continue; }
+          const minScore = (c.status === 'active') ? MIN_BOARD_RELEVANCE_ACTIVE : MIN_BOARD_RELEVANCE_WATCH;
+          if ((c.relevanceScore || 0) < minScore) { skipLowQuality++; continue; }
+          exSet.add(tl); addedTitles.push(c.title); added.push(c);
+          log(`    ✚ [${c.status}] "${c.title.slice(0,60)}" | score=${c.relevanceScore}`);
+        }
+        if (added.length >= 10) { log('  — lead cap reached'); break; }
+      }
+
+      const dur = Date.now() - start;
+      log(`═══ SERVER DAILY DONE in ${(dur/1000).toFixed(1)}s ═══`);
+      log(`Sources: ${fetchOk} ok, ${fetchFail} failed | Signals: ${parseHits} sources with hits`);
+      log(`Leads: +${added.length} new, ${updated.length} updated, ${skipNP} not-pursued, ${skipDupe} duped, ${skipLowQuality} low-quality`);
+
+      // Step 6: Merge added leads into shared lead corpus
+      if (added.length > 0) {
+        const mergedLeads = [...added, ...existingLeads];
+        const saved = await redisSet('ps_leads', mergedLeads);
+        if (saved) {
+          log(`  ✓ Merged ${added.length} new leads into shared store (${mergedLeads.length} total)`);
+        } else {
+          log('  ⚠ Failed to save merged leads to shared store');
+        }
+      }
+
+      // Step 7: Post-process: add highlight fields to all added leads
+      for (const lead of added) {
+        if (!lead.projectPotential) {
+          const combined = `${lead.title || ''} ${lead.description || ''}`;
+          lead.projectPotential = scoreProjectPotential(combined);
+        }
+        if (!lead.whyItMatters || lead.whyItMatters.length < 10) {
+          const signals = inferWhyAndWatch(`${lead.title || ''} ${lead.description || ''}`);
+          if (!lead.whyItMatters || lead.whyItMatters.length < 10) lead.whyItMatters = signals.whyItMatters;
+          if (!lead.whatToWatch) lead.whatToWatch = signals.whatToWatch;
+        }
+      }
+
+      // Step 8: Publish weekly brief from full corpus
+      let briefResult = null;
+      try {
+        briefResult = await serverPublishWeeklyBrief(added, existingLeads, log);
+      } catch (e) { log(`  ⚠ Brief publish error: ${e.message}`); }
+
+      const results = {
+        leadsAdded: added, leadsUpdated: updated,
+        sourcesFetched: fetchOk + fetchFail, fetchSuccesses: fetchOk, fetchFailures: fetchFail,
+        parseHits, duration: dur, mode: 'server-daily',
+        skippedNotPursued: skipNP, skippedDuplicate: skipDupe, skippedLowQuality: skipLowQuality,
+        sourceHealth: sourceHealthMap,
+        briefPublished: !!briefResult, briefWeekId: briefResult?.weekId || null,
+        corpusSize: existingLeads.length + added.length,
+      };
+
+      lastRun = { action: 'server-daily', ok: true, ts: new Date().toISOString(), added: added.length, updated: updated.length, dur };
+      return res.status(200).json({ ok: true, action: 'server-daily', results, logs, ts: new Date().toISOString(), scanBuildId: SCAN_BUILD_ID });
     }
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'POST required' });
