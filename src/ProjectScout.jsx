@@ -1611,6 +1611,16 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
             {/* ─── Watch-specific structured overview ─── */}
             {opStatus === LEAD_STATUS.WATCH ? (
               <>
+                {/* v4-b35: AI Review reason banner */}
+                {lead.reviewReason && (
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 8, background: '#fef3c7', border: '1px solid #fde68a', borderLeft: '4px solid #f59e0b' }}>
+                    <AlertCircle size={14} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 1 }} />
+                    <div>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: '#92400e', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>AI Review Flag</p>
+                      <p style={{ fontSize: 11.5, color: '#78716c', margin: 0, lineHeight: 1.5 }}>{lead.reviewReason}</p>
+                    </div>
+                  </div>
+                )}
                 {/* Reassess banner */}
                 {reassess && (
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 8, background: '#fffbeb', border: '1px solid #f59e0b', borderLeft: '4px solid #f59e0b' }}>
@@ -5381,6 +5391,7 @@ const TABS = [
   { id: 'news', label: 'News', icon: <Radio size={15} /> },
   { id: 'rfp', label: 'RFP / RFQ', icon: <FileText size={15} /> },
   { id: 'projects', label: 'Potential Projects', icon: <Target size={15} /> },
+  { id: 'review', label: 'Review', icon: <AlertCircle size={15} /> },
   { id: 'asana', label: 'Asana Leads / Go', icon: <Send size={15} /> },
   { id: 'notpursued', label: 'Asana No Go', icon: <Archive size={15} /> },
 ];
@@ -6214,31 +6225,15 @@ function boardQualityPrune(currentLeads, taxonomy = []) {
       // For Watch leads, only a narrow set of STRONG reasons auto-remove.
       // Everything else goes to Tier 2 pruning review instead.
       // This prevents Watch from collapsing and preserves project generators.
+      // v4-b35: Narrowed auto-remove to ONLY true junk. Everything else → review queue.
       const WATCH_STRONG_AUTO_REMOVE = new Set([
         'portal_fragment_title',
         'generic_solicitation_portal',
-        'procurement_only_title',
         'truncated_fragment',
         'mid_sentence_fragment',
         'watch_document_chrome',
         'watch_mid_sentence_fragment',
         'watch_truncated_fragment',
-        'already_claimed_has_designer',
-        'already_claimed_has_contractor',
-        'already_claimed_under_construction',
-        'already_claimed_completed',
-        'already_claimed_awarded',
-        'already_claimed_project_team_assembled',
-        'already_claimed_completed_prefix',
-        'civil_commodity_no_building',
-        // v3.5: Non-specific items are clearly not leads — auto-remove, don't clog review queue
-        'noise_title',
-        'no_lead_object_type',
-        // v4-b6: Weak news leads with no A&E signal — auto-remove
-        'weak_news_no_signal',
-        // v4-b14: Awarded/closed solicitations — auto-remove
-        'already_claimed_status_closed',
-        'already_claimed_status_awarded',
       ]);
 
       if (isStrategicWatch && !reason.startsWith('already_claimed_')) {
@@ -7007,7 +7002,7 @@ export default function ProjectScout() {
   // outside the canonical TABS list (e.g. stale 'active' / 'overview' from older
   // builds), snap it back to 'rfp' so the main panel never renders blank.
   useEffect(() => {
-    const validIds = ['news', 'rfp', 'projects', 'asana', 'notpursued'];
+    const validIds = ['news', 'rfp', 'projects', 'review', 'asana', 'notpursued'];
     if (!validIds.includes(activeTab)) {
       setActiveTab('rfp');
       return;
@@ -8383,9 +8378,10 @@ export default function ProjectScout() {
     news: leads.filter(l => getLeadTab(l) === 'news' && isMissoulaLead(l)).length,
     rfp: leads.filter(l => getLeadTab(l) === 'rfp' && isMissoulaLead(l)).length,
     projects: leads.filter(l => getLeadTab(l) === 'projects' && isMissoulaLead(l)).length,
+    review: pruningReviewQueue.length,
     asana: submittedLeads.length,
     notpursued: notPursuedLeads.length,
-  }), [leads, submittedLeads, notPursuedLeads]);
+  }), [leads, submittedLeads, notPursuedLeads, pruningReviewQueue]);
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fb', fontFamily: "'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif", color: '#1e293b' }}>
@@ -8448,11 +8444,10 @@ export default function ProjectScout() {
                     {activeCounts[tab.id]}
                   </span>
                 )}
-                {tab.id === 'rfp' && pruningReviewQueue.length > 0 && (
-                  <span onClick={(e) => { e.stopPropagation(); setPruneReviewVisible(true); }}
-                    style={{ fontSize: 8, fontWeight: 700, padding: '2px 5px', borderRadius: 8, background: '#f59e0b', color: '#fff', marginLeft: 2, cursor: 'pointer' }}
-                    title={`${pruningReviewQueue.length} lead(s) need pruning review`}>
-                    {pruningReviewQueue.length} review
+                {/* Review badge moved to dedicated Review tab */}
+                {tab.id === 'review' && pruningReviewQueue.length > 0 && (
+                  <span style={{ fontSize: 8, fontWeight: 700, padding: '2px 5px', borderRadius: 8, background: '#f59e0b', color: '#fff', marginLeft: 2 }}>
+                    {pruningReviewQueue.length}
                   </span>
                 )}
               </button>
@@ -8526,6 +8521,7 @@ export default function ProjectScout() {
                   {activeTab === 'news' && 'Items that might become opportunities'}
                   {activeTab === 'rfp' && 'Active solicitations and procurement'}
                   {activeTab === 'projects' && 'Districts, named projects, and capital signals'}
+                  {activeTab === 'review' && `${pruningReviewQueue.length} items need your review`}
                   {activeTab === 'asana' && `${submittedLeads.length} tracked`}
                   {activeTab === 'notpursued' && `${notPursuedLeads.length} archived`}
                 </span>
@@ -8991,6 +8987,83 @@ export default function ProjectScout() {
             <div><QueueHeader />{projectLeads.map(l => <QueueRow key={l.id} lead={l} isSelected={selectedLead?.id === l.id} onClick={() => handleSelectLead(l)} />)}</div>
           ) : (
             <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}><Target size={20} style={{ color: '#d1d5db', marginBottom: 6 }} /><p style={{ fontSize: 13, fontWeight: 600 }}>No potential projects yet</p><p style={{ fontSize: 11 }}>Run a scan to populate</p></div>
+          );
+        })()}
+
+        {/* v4-b35: Review Queue — AI-flagged uncertain items */}
+        {activeTab === 'review' && (() => {
+          const reviewItems = pruningReviewQueue;
+          // Suppression rules from localStorage
+          const SUPPRESSION_KEY = 'ps_suppression_rules';
+          const loadRules = () => { try { return JSON.parse(localStorage.getItem(SUPPRESSION_KEY) || '[]'); } catch { return []; } };
+          const saveRules = (rules) => { try { localStorage.setItem(SUPPRESSION_KEY, JSON.stringify(rules)); } catch {} };
+
+          const handlePromote = (item) => {
+            // Move from review to active board
+            setLeads(prev => prev.map(l => l.id === item.lead.id ? { ...l, pruneImmune: true, reviewReason: null } : l));
+            setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
+          };
+          const handleKeepWatching = (item) => {
+            setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
+          };
+          const handleIgnoreOnce = (item) => {
+            setLeads(prev => prev.filter(l => l.id !== item.lead.id));
+            setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
+          };
+          const handleNotPursued = (item) => {
+            moveToNotPursued(item.lead.id, `Review: ${item.reason || 'user decided not to pursue'}`);
+            setPruningReviewQueue(prev => prev.filter(r => r.lead.id !== item.lead.id));
+          };
+          const handleSuppressSimilar = (item, pattern) => {
+            const rules = loadRules();
+            rules.push({ pattern, reason: item.reason, created: new Date().toISOString(), source: item.lead.sourceName || '' });
+            saveRules(rules.slice(-50));
+            handleIgnoreOnce(item);
+          };
+
+          return reviewItems.length > 0 ? (
+            <div>
+              <p style={{ fontSize: 11.5, color: '#64748b', margin: '0 0 12px', lineHeight: 1.5 }}>
+                Items flagged by Scout as uncertain. Review and decide: promote, keep watching, or suppress.
+              </p>
+              {reviewItems.map((item, idx) => {
+                const lead = item.lead;
+                const isSelected = selectedLead?.id === lead?.id;
+                return (
+                  <div key={lead?.id || idx} style={{
+                    padding: '10px 14px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer',
+                    background: isSelected ? '#fef3c7' : '#fff', borderLeft: isSelected ? '3px solid #f59e0b' : '3px solid transparent',
+                    transition: 'background 0.08s',
+                  }}
+                    onClick={() => handleSelectLead(lead)}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fffbeb'; }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = isSelected ? '#fef3c7' : '#fff'; }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      <AlertCircle size={14} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, color: '#0f172a', fontSize: 12.5 }}>{cleanHtmlEntities(lead?.title || '')}</div>
+                        <div style={{ fontSize: 10.5, color: '#92400e', marginTop: 2, lineHeight: 1.4 }}>
+                          <strong>AI reason:</strong> {item.reason || 'Uncertain quality'}
+                        </div>
+                        {item.explanation && <div style={{ fontSize: 10, color: '#78716c', marginTop: 1 }}>{item.explanation.slice(0, 120)}</div>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                        <button onClick={() => handlePromote(item)} title="Promote to board" style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#166534', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>Promote</button>
+                        <button onClick={() => handleKeepWatching(item)} title="Keep on board, dismiss review flag" style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>Keep</button>
+                        <button onClick={() => handleNotPursued(item)} title="Move to Not Pursued" style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>Drop</button>
+                        <button onClick={() => handleSuppressSimilar(item, (lead?.title || '').slice(0, 30))} title="Suppress similar items" style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #fde68a', background: '#fffbeb', color: '#92400e', fontSize: 9, fontWeight: 700, cursor: 'pointer' }}>Suppress</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94a3b8' }}>
+              <CheckCircle2 size={20} style={{ color: '#10b981', marginBottom: 6 }} />
+              <p style={{ fontSize: 13, fontWeight: 600 }}>Review queue clear</p>
+              <p style={{ fontSize: 11 }}>No uncertain items need your attention</p>
+            </div>
           );
         })()}
 
