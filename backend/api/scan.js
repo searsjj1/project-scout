@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.24-20260416-shared-brief-b29';
+const SCAN_BUILD_ID = 'scan-v4.25-20260416-full-corpus-brief-b30';
 
 // ── v4-b29: Server-side weekly brief publish (to Upstash Redis) ─────
 // Computes a weekly brief snapshot from the scan's lead corpus and stores it
@@ -42,38 +42,63 @@ function serverComputeWeekLabel(timestamp) {
   return `Week of ${fmt(mon)} – ${fmt(sun)}, ${mon.getFullYear()}`;
 }
 
-async function serverPublishWeeklyBrief(addedLeads, existingLeads, log) {
+async function serverPublishWeeklyBrief(addedLeads, callerExistingLeads, log) {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) { log('  ⚠ Brief publish skipped — no Upstash configured'); return null; }
+
+  // Helper: read a key from Upstash Redis
+  const redisGet = async (key) => {
+    try {
+      const r = await fetch(`${url}/get/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (!d.result) return null;
+      let parsed = JSON.parse(d.result);
+      if (typeof parsed === 'string') try { parsed = JSON.parse(parsed); } catch {}
+      return parsed;
+    } catch { return null; }
+  };
+  const redisSet = async (key, value) => {
+    const r = await fetch(`${url}/set/${encodeURIComponent(key)}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
+      body: JSON.stringify(value),
+    });
+    return r.ok;
+  };
 
   const DAY = 86400000;
   const now = Date.now();
   const weekId = serverComputeWeekId(now);
   const weekLabel = serverComputeWeekLabel(now);
 
-  // Read current archive from Redis
+  // Read current brief archive from Redis
   let archive = [];
-  try {
-    const getResp = await fetch(`${url}/get/${encodeURIComponent(BRIEF_REDIS_KEY)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (getResp.ok) {
-      const d = await getResp.json();
-      if (d.result) {
-        let parsed = JSON.parse(d.result);
-        if (typeof parsed === 'string') try { parsed = JSON.parse(parsed); } catch {}
-        if (Array.isArray(parsed)) archive = parsed;
-      }
-    }
-  } catch {}
+  const archiveData = await redisGet(BRIEF_REDIS_KEY);
+  if (Array.isArray(archiveData)) archive = archiveData;
 
   // Check if this week already published
-  const existing = archive.find(s => s.weekId === weekId);
-  if (existing) { log(`  Brief: ${weekId} already published — skipping`); return null; }
+  const existingBrief = archive.find(s => s.weekId === weekId);
+  if (existingBrief) { log(`  Brief: ${weekId} already published — skipping`); return null; }
 
-  // Build the brief from the combined lead corpus (existing + newly added)
-  const allLeads = [...(existingLeads || []), ...(addedLeads || [])];
+  // ── FULL CORPUS: Read the shared lead state from Upstash Redis ──
+  // This is the authoritative lead corpus — same data that store.js serves and the frontend syncs.
+  // Falls back to caller-provided existingLeads only if Redis read fails.
+  let sharedLeads = await redisGet('ps_leads');
+  let corpusSource = 'upstash';
+  if (!Array.isArray(sharedLeads) || sharedLeads.length === 0) {
+    // Fallback to caller-provided leads (browser-driven scans send existingLeads in the POST body)
+    sharedLeads = callerExistingLeads || [];
+    corpusSource = sharedLeads.length > 0 ? 'caller' : 'empty';
+  }
+
+  // Merge: shared corpus + freshly added leads from this scan (deduped by id)
+  const seenIds = new Set(sharedLeads.map(l => l.id));
+  const freshNew = (addedLeads || []).filter(l => l.id && !seenIds.has(l.id));
+  const allLeads = [...sharedLeads, ...freshNew];
+
+  log(`  Brief corpus: ${sharedLeads.length} shared (${corpusSource}) + ${freshNew.length} new from scan = ${allLeads.length} total`);
+
   // Simple lead-tab classification (mirrors frontend getLeadTab)
   const isNews = (l) => {
     if (l.leadClass === 'active_solicitation' || l.status === 'active') return false;
@@ -112,6 +137,25 @@ async function serverPublishWeeklyBrief(addedLeads, existingLeads, log) {
   const budgetLeads = within7d.filter(l => l.potentialBudget);
   if (budgetLeads.length > 0) narrative += ` Funding: ${budgetLeads[0].potentialBudget} for ${budgetLeads[0].title}.`;
 
+  // Extract active owner/entity themes
+  const ORG_PATS = [
+    [/\b(city\s+of\s+missoula|city\s+council)\b/i, 'City of Missoula'],
+    [/\b(missoula\s+county|county\s+commission)\b/i, 'Missoula County'],
+    [/\b(mra|missoula\s+redevelopment)\b/i, 'MRA'],
+    [/\b(mep|missoula\s+economic)\b/i, 'MEP'],
+    [/\b(housing\s+authority|mha)\b/i, 'Housing Authority'],
+    [/\b(mcps|school\s+board|school\s+district)\b/i, 'MCPS'],
+    [/\b(airport\s+authority|missoula\s+airport)\b/i, 'Airport Authority'],
+    [/\b(university\s+of\s+montana)\b/i, 'University of Montana'],
+  ];
+  const orgCounts = new Map();
+  for (const l of within7d) {
+    const txt = `${l.title || ''} ${l.owner || ''} ${l.sourceName || ''} ${l.description || ''}`;
+    for (const [pat, name] of ORG_PATS) { if (pat.test(txt)) orgCounts.set(name, (orgCounts.get(name) || 0) + 1); }
+  }
+  const activeOrgs = [...orgCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([n]) => n);
+  if (activeOrgs.length > 0) narrative += ` Active: ${activeOrgs.join(', ')}.`;
+
   const snapshot = {
     date: new Date().toISOString(),
     weekId,
@@ -125,22 +169,19 @@ async function serverPublishWeeklyBrief(addedLeads, existingLeads, log) {
     narrative7d: narrative,
     trigger: 'server-scan',
     scanBuildId: SCAN_BUILD_ID,
+    corpusSource,
+    corpusSize: allLeads.length,
+    activeOrgs,
   };
 
   // Save — replace same-week, keep last 8
   const others = archive.filter(s => s.weekId !== weekId);
   const updated = [...others.slice(-7), snapshot];
 
-  try {
-    const setResp = await fetch(`${url}/set/${encodeURIComponent(BRIEF_REDIS_KEY)}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain' },
-      body: JSON.stringify(updated),
-    });
-    if (!setResp.ok) { log(`  ⚠ Brief Redis SET failed: ${setResp.status}`); return null; }
-  } catch (e) { log(`  ⚠ Brief Redis error: ${e.message}`); return null; }
+  const saved = await redisSet(BRIEF_REDIS_KEY, updated);
+  if (!saved) { log('  ⚠ Brief Redis SET failed'); return null; }
 
-  log(`  ✓ Brief published: ${weekId} (${within7d.length} items, ${high.length} high) — server-scan`);
+  log(`  ✓ Brief published: ${weekId} (${within7d.length} items, ${high.length} high, corpus: ${allLeads.length} from ${corpusSource}) — server-scan`);
   return snapshot;
 }
 

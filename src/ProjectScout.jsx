@@ -8746,12 +8746,15 @@ export default function ProjectScout() {
                 {/* Week label + publish state */}
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 500 }}>{weekLabel}</span>
-                  {publishedThisWeek && !hasLiveChanges && (
-                    <span title={`Published via ${publishTrigger} (${briefSource})`} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: publishTrigger === 'server-scan' ? '#dbeafe' : '#f0fdf4', color: publishTrigger === 'server-scan' ? '#1e40af' : '#166534', border: `1px solid ${publishTrigger === 'server-scan' ? '#93c5fd' : '#bbf7d0'}`, fontWeight: 600 }}>
+                  {publishedThisWeek && !hasLiveChanges && (() => {
+                    const cs = publishedThisWeek.corpusSource;
+                    const corpusLabel = cs === 'upstash' ? `Full corpus (${publishedThisWeek.corpusSize || '?'} leads)` : cs === 'caller' ? 'Partial (caller leads)' : '';
+                    return <span title={`Published via ${publishTrigger} (${briefSource}). ${corpusLabel}`} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: publishTrigger === 'server-scan' ? '#dbeafe' : '#f0fdf4', color: publishTrigger === 'server-scan' ? '#1e40af' : '#166534', border: `1px solid ${publishTrigger === 'server-scan' ? '#93c5fd' : '#bbf7d0'}`, fontWeight: 600 }}>
                       {publishTrigger === 'server-scan' ? 'Published by server scan' : publishTrigger === 'scan' ? 'Published after scan' : publishTrigger === 'news-tab' ? 'Auto-published' : 'Published'}
-                    </span>
-                  )}
+                    </span>;
+                  })()}
                   {briefSource === 'server' && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe', fontWeight: 600 }}>SHARED</span>}
+                  {publishedThisWeek?.corpusSource === 'upstash' && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontWeight: 600 }}>FULL CORPUS</span>}
                   {publishedThisWeek && hasLiveChanges && (
                     <button onClick={() => { republishBrief(); window.location.reload(); }} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 600, cursor: 'pointer' }}>
                       Updated since {publishTrigger === 'server-scan' ? 'server scan' : 'publish'} — Republish
