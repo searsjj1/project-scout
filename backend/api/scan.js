@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.27-20260416-content-quality-b32';
+const SCAN_BUILD_ID = 'scan-v4.28-20260416-cleanup-evidence-b33';
 
 // ── v4-b29: Server-side weekly brief publish (to Upstash Redis) ─────
 // Computes a weekly brief snapshot from the scan's lead corpus and stores it
@@ -5515,6 +5515,87 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ ok: f.ok, fetch: { status:f.status, title:f.title, length:f.length, lastMod:f.lastMod, error:f.err },
         keywords: kw, leads, logs, ts: new Date().toISOString() });
+    }
+
+    // ── v4-b32: CLEANUP — retroactive quality prune of shared lead corpus ─────
+    if (action === 'cleanup') {
+      log('═══ RETROACTIVE LEAD CLEANUP ═══');
+      log(`🔧 Backend Build: ${SCAN_BUILD_ID} | Server Time: ${new Date().toISOString()}`);
+
+      const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+      const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+      if (!redisUrl || !redisToken) {
+        return res.status(200).json({ ok: false, error: 'Upstash not configured', logs, scanBuildId: SCAN_BUILD_ID, ts: new Date().toISOString() });
+      }
+      const redisGet = async (key) => { try { const r = await fetch(`${redisUrl}/get/${encodeURIComponent(key)}`, { headers: { Authorization: `Bearer ${redisToken}` } }); if (!r.ok) return null; const d = await r.json(); if (!d.result) return null; let p = JSON.parse(d.result); if (typeof p === 'string') try { p = JSON.parse(p); } catch {} return p; } catch { return null; } };
+      const redisSet = async (key, value) => { try { const r = await fetch(`${redisUrl}/set/${encodeURIComponent(key)}`, { method: 'POST', headers: { Authorization: `Bearer ${redisToken}`, 'Content-Type': 'text/plain' }, body: JSON.stringify(value) }); return r.ok; } catch { return false; } };
+
+      // Load shared state
+      const leads = (await redisGet('ps_leads')) || [];
+      const notPursued = (await redisGet('ps_notpursued')) || [];
+      log(`Loaded: ${leads.length} leads, ${notPursued.length} not-pursued`);
+
+      if (leads.length === 0) {
+        return res.status(200).json({ ok: true, message: 'No leads to clean', leads: 0, pruned: 0, logs, scanBuildId: SCAN_BUILD_ID, ts: new Date().toISOString() });
+      }
+
+      const now = new Date().toISOString();
+      const kept = [];
+      const pruned = [];
+
+      for (const lead of leads) {
+        const title = (lead.title || '');
+        const desc = (lead.description || '');
+        const combined = `${title} ${desc}`;
+
+        // Skip immune leads
+        if (lead.pruneImmune || lead.favorite) { kept.push(lead); continue; }
+
+        let reason = null;
+
+        // 1. Generic news headline
+        if (isGenericNewsHeadline(title)) reason = 'generic_news_headline';
+        // 2. Noise lead (full check)
+        if (!reason && isNoiseLead(title, combined, lead.sourceUrl || '')) reason = 'noise_lead';
+        // 3. Retrospective
+        if (!reason && isRetrospectiveTitle(title)) reason = 'retrospective';
+        // 4. Navigation junk
+        if (!reason && isNavigationJunk(title)) reason = 'navigation_junk';
+        // 5. Very low relevance
+        if (!reason && (lead.relevanceScore || 0) < 20) reason = 'very_low_relevance';
+        // 6. Generic portal/listing title
+        if (!reason && /^(current|open|active)\s+(solicitations?|bids?|rfps?|rfqs?)$/i.test(title.trim())) reason = 'portal_title';
+        // 7. Standalone department/office page
+        if (!reason && /^[\w\s&']+\s+(department|office|division|bureau|program)$/i.test(title.trim()) && !/\b(construction|design|capital|renovation|project|facility|building)\b/i.test(combined)) reason = 'generic_department';
+        // 8. Vague strategic area with no substance
+        if (!reason && lead.watchCategory === 'redevelopment_area' && (lead.relevanceScore || 0) < 35 && !lead.potentialBudget && !/\b(rfq|rfp|design|construction|renovation|funded|approved|authorized)\b/i.test(combined)) reason = 'weak_strategic_area';
+
+        if (reason) {
+          pruned.push({ ...lead, status: 'not_pursued', reasonNotPursued: `Retroactive cleanup: ${reason}`, dateNotPursued: now, reasonCategory: 'quality_cleanup' });
+          log(`  ✂ "${title.slice(0,60)}" — ${reason}`);
+        } else {
+          kept.push(lead);
+        }
+      }
+
+      log(`Result: ${kept.length} kept, ${pruned.length} pruned`);
+
+      // Write back
+      if (pruned.length > 0) {
+        const updatedNP = [...pruned, ...notPursued];
+        await redisSet('ps_leads', kept);
+        await redisSet('ps_notpursued', updatedNP);
+        log(`✓ Saved: ${kept.length} leads, ${updatedNP.length} not-pursued`);
+      }
+
+      return res.status(200).json({
+        ok: true,
+        action: 'cleanup',
+        leads: kept.length,
+        pruned: pruned.length,
+        prunedItems: pruned.map(p => ({ title: p.title, reason: p.reasonNotPursued })),
+        logs, scanBuildId: SCAN_BUILD_ID, ts: new Date().toISOString(),
+      });
     }
 
     // ── GMAIL-TEST — diagnostic endpoint to verify Gmail pipeline ─────

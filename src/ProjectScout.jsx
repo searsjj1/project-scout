@@ -1835,102 +1835,119 @@ function LeadDetail({ lead, onClose, onUpdate, onMoveToNotPursued, onSubmitToAsa
         )}
 
         {activeTab === 'evidence' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* v31c: Evidence header — shown for both Active and Watch */}
-            <div style={{ padding: '10px 14px', borderRadius: 8, background: isWatch ? '#fefdf8' : '#eff6ff', border: `1px solid ${isWatch ? '#fde68a' : '#bfdbfe'}`, marginBottom: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                {isWatch ? <Eye size={12} style={{ color: '#92400e' }} /> : <FileText size={12} style={{ color: '#2563eb' }} />}
-                <span style={{ fontSize: 11, fontWeight: 700, color: isWatch ? '#92400e' : '#1e40af' }}>
-                  {isWatch ? 'Source Intelligence' : 'Pursuit Evidence'}
-                </span>
-              </div>
-              <p style={{ fontSize: 11.5, color: '#78716c', margin: 0, lineHeight: 1.5 }}>
-                {isWatch
-                  ? 'Sources below support this item\'s presence on the board. Best source listed first.'
-                  : 'Evidence supporting this active pursuit. Review sources to assess credibility and prepare for Go/No-Go.'}
-              </p>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* v4-b32: Structured Evidence — extracted facts first, then source links */}
 
-            {/* Evidence Source Links — SOURCE-FIRST: shown before summary */}
+            {/* ── Extracted Facts Panel ── */}
             {(() => {
-              // Build a comprehensive evidence link list from all available data
+              const txt = `${lead.title || ''} ${lead.description || ''} ${lead.highlightSummary || ''} ${lead.evidenceSummary || ''} ${lead.whyItMatters || ''}`;
+              const facts = [];
+              // Scope clues
+              const scopeMatch = txt.match(/\b(\d+[\s,]*(?:unit|bed|room|seat|square\s*f(?:oo|ee)t|sf|gsf|acre|lot|parcel|story|stories|phase|building|structure|site)s?)\b/i);
+              if (scopeMatch) facts.push({ label: 'Scope', value: scopeMatch[0].trim(), icon: '📐' });
+              // Funding/budget
+              if (lead.potentialBudget) facts.push({ label: 'Funding', value: lead.potentialBudget, icon: '💰' });
+              else { const bm = txt.match(/\$[\d,]+(?:\.\d+)?(?:\s*(?:million|M|k|billion|B))?\b/); if (bm) facts.push({ label: 'Funding signal', value: bm[0], icon: '💰' }); }
+              // Due date / timing
+              if (lead.action_due_date) facts.push({ label: 'Due date', value: lead.action_due_date, icon: '📅' });
+              const timeMatch = txt.match(/\b(Q[1-4]\s*20\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20\d{2}|(?:spring|summer|fall|winter)\s+20\d{2}|FY\s*20\d{2})/i);
+              if (timeMatch && !lead.action_due_date) facts.push({ label: 'Timing signal', value: timeMatch[0], icon: '📅' });
+              // Approval / authorization
+              if (/\b(approved|authorized|adopted|passed|granted|awarded|funded)\b/i.test(txt)) facts.push({ label: 'Status', value: txt.match(/\b(approved|authorized|adopted|passed|granted|awarded|funded)\b/i)[0] + ' — confirmed by source', icon: '✅' });
+              // Design / engineering
+              if (/\b(design\s+(?:and\s+)?engineering|architectural services|a\/e\s+services|consultant selection|design services)\b/i.test(txt)) facts.push({ label: 'A&E signal', value: 'Design/engineering services indicated', icon: '✏️' });
+              // Procurement
+              if (/\b(rfq|rfp|solicitation|invitation to bid|request for)\b/i.test(txt)) facts.push({ label: 'Procurement', value: 'Active or anticipated solicitation', icon: '📋' });
+              // Owner / entity
+              if (lead.owner && lead.owner !== 'Email' && lead.owner.length > 3) facts.push({ label: 'Owner', value: lead.owner, icon: '🏛️' });
+              // Project stage
+              const ps = inferProjectStage(lead);
+              if (ps.stage !== 'Unknown') facts.push({ label: 'Stage', value: ps.stage, icon: ps.icon });
+
+              return facts.length > 0 ? (
+                <div style={{ padding: '12px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#166534', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Extracted Facts</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {facts.map((f, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11.5, lineHeight: 1.4 }}>
+                        <span style={{ flexShrink: 0 }}>{f.icon}</span>
+                        <div><span style={{ fontWeight: 700, color: '#166534' }}>{f.label}: </span><span style={{ color: '#334155' }}>{f.value}</span></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {/* ── Source Artifact Links ── */}
+            {(() => {
               const allLinks = [];
-              // Add evidenceSourceLinks
-              if (lead.evidenceSourceLinks?.length > 0) {
-                lead.evidenceSourceLinks.forEach(sl => allLinks.push(sl));
-              }
-              // Add sourceUrl if not already in the list
-              if (lead.sourceUrl && !allLinks.some(l => l.url === lead.sourceUrl)) {
-                allLinks.push({ url: lead.sourceUrl, label: lead.sourceName || 'Source Page', linkType: 'source_page' });
-              }
-              // Add evidenceLinks if not already present
-              if (lead.evidenceLinks?.length > 0) {
-                lead.evidenceLinks.forEach(url => {
-                  if (url && !allLinks.some(l => l.url === url)) {
-                    allLinks.push({ url, label: inferEvidenceLabel(url), linkType: inferEvidenceLinkType(url) });
-                  }
-                });
-              }
-
+              if (lead.evidenceSourceLinks?.length > 0) lead.evidenceSourceLinks.forEach(sl => allLinks.push(sl));
+              if (lead.sourceUrl && !allLinks.some(l => l.url === lead.sourceUrl)) allLinks.push({ url: lead.sourceUrl, label: lead.sourceName || 'Source Page', linkType: 'source_page' });
+              if (lead.evidenceLinks?.length > 0) lead.evidenceLinks.forEach(url => { if (url && !allLinks.some(l => l.url === url)) allLinks.push({ url, label: inferEvidenceLabel(url), linkType: inferEvidenceLinkType(url) }); });
               if (allLinks.length === 0) return null;
-
               return (
-                <DetailSection title="Evidence Sources">
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <DetailSection title="Source Artifacts">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {allLinks.map((sl, idx) => {
                       const typeLabel = formatLinkTypeLabel(sl.linkType);
-                      const isSourcePage = sl.linkType === 'source_page';
-                      const preview = generateEvidencePreview(sl, lead);
+                      const isSource = sl.linkType === 'source_page';
                       return (
-                        <div key={idx} style={{ borderRadius: 8, border: isSourcePage ? '1px solid #e2e8f0' : '1px solid #bfdbfe', overflow: 'hidden' }}>
-                          <a href={sl.url} target="_blank" rel="noopener noreferrer"
-                            style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 11px', background: isSourcePage ? '#f8fafc' : '#eff6ff', color: isSourcePage ? '#475569' : '#2563eb', fontSize:11.5, fontWeight:600, textDecoration:'none', transition:'background 0.15s' }}
-                            onMouseEnter={e => e.currentTarget.style.background = isSourcePage ? '#f1f5f9' : '#dbeafe'}
-                            onMouseLeave={e => e.currentTarget.style.background = isSourcePage ? '#f8fafc' : '#eff6ff'}>
-                            {isSourcePage ? <Globe size={12} /> : sl.linkType === 'document_pdf' ? <FileText size={12} /> : <Link2 size={12} />}
-                            <span style={{ flex:1 }}>{sl.label || sl.url}</span>
-                            <span style={{ fontSize:9, color: isSourcePage ? '#94a3b8' : '#60a5fa', textTransform:'uppercase', letterSpacing:'0.03em', fontWeight:600, whiteSpace:'nowrap', padding: '1px 5px', borderRadius: 4, background: isSourcePage ? '#f1f5f9' : '#dbeafe' }}>{typeLabel}</span>
-                            <ExternalLink size={10} style={{ opacity:0.4, flexShrink:0 }} />
-                          </a>
-                          {preview && opStatus === LEAD_STATUS.WATCH && (
-                            <div style={{ padding: '6px 11px 8px', background: '#fff', borderTop: '1px solid ' + (isSourcePage ? '#f1f5f9' : '#dbeafe'), fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
-                              {preview}
-                            </div>
-                          )}
-                        </div>
+                        <a key={idx} href={sl.url} target="_blank" rel="noopener noreferrer"
+                          style={{ display:'flex', alignItems:'center', gap:7, padding:'7px 11px', borderRadius: 7, background: isSource ? '#f8fafc' : '#eff6ff', border: `1px solid ${isSource ? '#e2e8f0' : '#bfdbfe'}`, color: isSource ? '#475569' : '#2563eb', fontSize:11.5, fontWeight:600, textDecoration:'none', transition:'background 0.12s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = isSource ? '#f1f5f9' : '#dbeafe'}
+                          onMouseLeave={e => e.currentTarget.style.background = isSource ? '#f8fafc' : '#eff6ff'}>
+                          {isSource ? <Globe size={12} /> : sl.linkType === 'document_pdf' ? <FileText size={12} /> : <Link2 size={12} />}
+                          <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sl.label || sl.url}</span>
+                          <span style={{ fontSize:9, textTransform:'uppercase', letterSpacing:'0.03em', fontWeight:600, padding:'1px 5px', borderRadius:4, background: isSource ? '#f1f5f9' : '#dbeafe', color: isSource ? '#94a3b8' : '#60a5fa' }}>{typeLabel}</span>
+                          <ExternalLink size={10} style={{ opacity:0.4, flexShrink:0 }} />
+                        </a>
                       );
                     })}
                   </div>
                 </DetailSection>
               );
             })()}
-            {/* Evidence Summary — shown after sources (source-first layout) */}
-            {lead.evidenceSummary && (
-              <DetailSection title="Evidence Summary"><p style={detailText}>{lead.evidenceSummary}</p></DetailSection>
-            )}
-            {/* v31c: Confidence notes — signal quality summary */}
-            {lead.confidenceNotes && (
-              <DetailSection title="Signal Quality">
-                <div style={{ padding: '10px 14px', borderRadius: 8, background: '#fafbfc', border: '1px solid #f1f5f9' }}>
-                  <p style={{ fontSize: 11.5, color: '#64748b', margin: 0, lineHeight: 1.6 }}>{lead.confidenceNotes}</p>
+
+            {/* ── Scout Interpretation ── */}
+            {(lead.evidenceSummary || lead.whyItMatters || lead.whatToWatch) && (
+              <DetailSection title="Scout Interpretation">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {lead.evidenceSummary && (
+                    <div style={{ padding: '8px 12px', borderRadius: 7, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>What the evidence says</div>
+                      <p style={{ fontSize: 11.5, color: '#475569', margin: 0, lineHeight: 1.6 }}>{cleanHtmlEntities(lead.evidenceSummary).slice(0, 400)}</p>
+                    </div>
+                  )}
+                  {lead.whyItMatters && (
+                    <div style={{ padding: '8px 12px', borderRadius: 7, background: '#f0f4ff', borderLeft: '3px solid #3b82f6' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Why it matters for BD</div>
+                      <p style={{ fontSize: 11.5, color: '#334155', margin: 0, lineHeight: 1.5 }}>{lead.whyItMatters}</p>
+                    </div>
+                  )}
+                  {lead.whatToWatch && (
+                    <div style={{ padding: '8px 12px', borderRadius: 7, background: '#faf5ff', borderLeft: '3px solid #8b5cf6' }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Next milestones to watch</div>
+                      <p style={{ fontSize: 11.5, color: '#475569', margin: 0, lineHeight: 1.5 }}>{lead.whatToWatch}</p>
+                    </div>
+                  )}
                 </div>
               </DetailSection>
             )}
 
-            {/* Signal Keywords + Target Orgs — Evidence context, not Overview */}
-            {lead.matchedTargetOrgs?.length > 0 && (
-              <DetailSection title="Target Organizations">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                  {lead.matchedTargetOrgs.map(o => <span key={o} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: '#eff6ff', color: '#3b82f6', fontWeight: 500 }}>{o}</span>)}
+            {/* ── Signal Quality + Keywords ── */}
+            {lead.confidenceNotes && (
+              <DetailSection title="Signal Quality">
+                <div style={{ padding: '8px 12px', borderRadius: 7, background: '#fafbfc', border: '1px solid #f1f5f9' }}>
+                  <p style={{ fontSize: 11, color: '#64748b', margin: 0, lineHeight: 1.5 }}>{lead.confidenceNotes}</p>
                 </div>
               </DetailSection>
             )}
-            {lead.matchedKeywords?.length > 0 && (
-              <DetailSection title="Signal Keywords">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                  {lead.matchedKeywords.map(k => <span key={k} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: '#f1f5f9', color: '#94a3b8', fontWeight: 500 }}>{k}</span>)}
-                </div>
-              </DetailSection>
+            {(lead.matchedKeywords?.length > 0 || lead.matchedTargetOrgs?.length > 0) && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {lead.matchedTargetOrgs?.length > 0 && lead.matchedTargetOrgs.map(o => <span key={o} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: '#eff6ff', color: '#3b82f6', fontWeight: 500 }}>{o}</span>)}
+                {lead.matchedKeywords?.length > 0 && lead.matchedKeywords.map(k => <span key={k} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: '#f1f5f9', color: '#94a3b8', fontWeight: 500 }}>{k}</span>)}
+              </div>
             )}
             {lead.taxonomyMatches?.length > 0 && (
               <DetailSection title="Taxonomy Influence">
