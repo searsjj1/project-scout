@@ -33,6 +33,7 @@ const ALLOWED_KEYS = new Set([
   'ps_news_brief_archive', // v4-b29: shared weekly BD briefing archive
   'ps_sources',            // v4-b30: shared source registry for server-side scans
   'ps_taxonomy',           // v4-b30: shared taxonomy for server-side scans
+  'ps_suppression_rules',  // v4-b35: shared suppression rules from Review queue
 ]);
 
 // ── Upstash Redis REST client (zero deps, pure fetch) ──

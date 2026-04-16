@@ -4604,6 +4604,7 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, onApplyValidation, allLe
             submittedLeads: submittedLeads.map(s => ({ id: s.id, title: s.title, asana_task_name: s.asana_task_name, scout_title: s.scout_title, user_edited_title: s.user_edited_title, alternate_titles: s.alternate_titles })),
             taxonomy: taxonomy,
             settings: safeSettings,
+            suppressionRules: JSON.parse(localStorage.getItem('ps_suppression_rules') || '[]'),
           }),
         });
         if (!resp.ok) throw new Error(`Backend returned ${resp.status}: ${await resp.text().then(t=>t.slice(0,200))}`);
@@ -5108,6 +5109,43 @@ function SettingsTab({ onMergeResults, onRunAsanaCheck, onApplyValidation, allLe
             </div>
           )}
         </div>
+      </div>
+
+      {/* v4-b35: Suppression Rules Manager */}
+      <div style={{ marginTop: 24, padding: '16px 20px', background: '#fffbeb', borderRadius: 10, border: '1px solid #fde68a' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <AlertCircle size={14} style={{ color: '#f59e0b' }} />
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#92400e', margin: 0 }}>Suppression Rules</h3>
+          <span style={{ fontSize: 10, color: '#b45309', marginLeft: 'auto' }}>
+            {(() => { try { return JSON.parse(localStorage.getItem('ps_suppression_rules') || '[]').length; } catch { return 0; } })()} active
+          </span>
+        </div>
+        <p style={{ fontSize: 11, color: '#78716c', margin: '0 0 8px', lineHeight: 1.5 }}>
+          Items matching these patterns are blocked during scans. Created from the Review queue Suppress action.
+        </p>
+        {(() => {
+          let rules = [];
+          try { rules = JSON.parse(localStorage.getItem('ps_suppression_rules') || '[]'); } catch {}
+          if (rules.length === 0) return <p style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>No suppression rules yet. Use the Review tab to suppress recurring noise.</p>;
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {rules.map((r, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', background: '#fff', borderRadius: 6, border: '1px solid #fef3c7', fontSize: 11 }}>
+                  <span style={{ flex: 1, color: '#0f172a', fontWeight: 600 }}>"{r.pattern}"</span>
+                  <span style={{ fontSize: 9.5, color: '#92400e' }}>{r.reason || 'user suppressed'}</span>
+                  <span style={{ fontSize: 9, color: '#b45309' }}>{r.created ? new Date(r.created).toLocaleDateString() : ''}</span>
+                  <button onClick={() => {
+                    const updated = rules.filter((_, j) => j !== i);
+                    try { localStorage.setItem('ps_suppression_rules', JSON.stringify(updated)); } catch {}
+                    // Also sync to shared store
+                    try { const s = JSON.parse(localStorage.getItem('ps_settings') || '{}'); const b = (s.backendEndpoint||'').replace(/\/+$/,''); if (b) fetch(`${b}/api/store?action=set`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key:'ps_suppression_rules',value:updated}) }).catch(()=>{}); } catch {}
+                    window.location.reload();
+                  }} style={{ padding: '2px 6px', borderRadius: 3, border: '1px solid #fecaca', background: '#fff', color: '#dc2626', fontSize: 9, fontWeight: 600, cursor: 'pointer' }}>Remove</button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {/* About */}
@@ -6289,7 +6327,7 @@ export default function ProjectScout() {
   // Syncs lead-state records to a shared server-side store (Upstash Redis via Vercel)
   // so they are not trapped in one browser's localStorage.
   // Falls back gracefully to local-only if the shared store is unavailable.
-  const SHARED_KEYS = new Set(['leads', 'submitted', 'notpursued', 'pruning_review_queue', 'prune_memory', 'sources', 'taxonomy']);
+  const SHARED_KEYS = new Set(['leads', 'submitted', 'notpursued', 'pruning_review_queue', 'prune_memory', 'sources', 'taxonomy', 'suppression_rules']);
   const [sharedStoreStatus, setSharedStoreStatus] = useState('checking'); // 'checking' | 'connected' | 'local-only' | 'error'
   const sharedSyncTimers = useRef({});
   const sharedStoreUrl = useRef(null);
@@ -9016,8 +9054,22 @@ export default function ProjectScout() {
           };
           const handleSuppressSimilar = (item, pattern) => {
             const rules = loadRules();
-            rules.push({ pattern, reason: item.reason, created: new Date().toISOString(), source: item.lead.sourceName || '' });
+            rules.push({
+              pattern,
+              reason: item.reason || 'user suppressed from Review',
+              ruleType: item.internalReason || 'title_pattern',
+              created: new Date().toISOString(),
+              source: item.lead?.sourceName || '',
+              originTitle: item.lead?.title || '',
+              createdBy: 'review_action',
+            });
             saveRules(rules.slice(-50));
+            // Also sync to shared store
+            try {
+              const settings = JSON.parse(localStorage.getItem('ps_settings') || '{}');
+              const backend = (settings.backendEndpoint || '').replace(/\/+$/, '');
+              if (backend) fetch(`${backend}/api/store?action=set`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'ps_suppression_rules', value: rules.slice(-50) }) }).catch(() => {});
+            } catch {}
             handleIgnoreOnce(item);
           };
 

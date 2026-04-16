@@ -16,7 +16,7 @@
  */
 
 // ── BUILD ID — change this value to verify which backend is running ──
-const SCAN_BUILD_ID = 'scan-v4.29-20260416-structured-evidence-b34';
+const SCAN_BUILD_ID = 'scan-v4.30-20260416-suppression-enforcement-b35';
 
 // ── v4-b29: Server-side weekly brief publish (to Upstash Redis) ─────
 // Computes a weekly brief snapshot from the scan's lead corpus and stores it
@@ -1263,6 +1263,26 @@ function isGmailSuppressed(email) {
   // Content suppression: no A&E signal in body
   const hasSignal = /\b(construction|renovation|design|building|facility|development|redevelopment|housing|infrastructure|capital|bond|rfp|rfq|solicitation|procurement|bid|project|master plan|feasibility|engineering|architect|permit|rezoning|annexation|subdivision|school|hospital|campus|airport|fire station|library|courthouse)\b/.test(body);
   if (!hasSignal && body.length > 200) return 'no_ae_signal';
+  return null;
+}
+
+/**
+ * v4-b35: Check a lead title against user-created suppression rules.
+ * Returns the matching rule object if suppressed, or null if no match.
+ * Suppression rules are { pattern, reason, created, source, ruleType }.
+ */
+function checkSuppressionRules(title, suppressionRules) {
+  if (!suppressionRules || suppressionRules.length === 0) return null;
+  const titleLo = (title || '').toLowerCase().trim();
+  if (titleLo.length < 5) return null;
+  for (const rule of suppressionRules) {
+    const patLo = (rule.pattern || '').toLowerCase().trim();
+    if (patLo.length < 3) continue;
+    // Match: title contains the pattern, or pattern contains the title (for short patterns)
+    if (titleLo.includes(patLo) || (patLo.length >= 8 && patLo.includes(titleLo))) {
+      return rule;
+    }
+  }
   return null;
 }
 
@@ -5438,11 +5458,15 @@ export default async function handler(req, res) {
       const npSet = new Set(notPursuedLeads.map(l => (l.title||'').toLowerCase().trim()));
       const exSet = new Set([...allEx.map(l => (l.title||'').toLowerCase().trim()), ...allSubmittedTitles]);
 
+      // Step 4b: Load suppression rules from shared store
+      const suppressionRules = (await redisGet('ps_suppression_rules')) || [];
+      if (suppressionRules.length > 0) log(`Suppression rules: ${suppressionRules.length} active`);
+
       log(`═══ DAILY — ${list.length} of ${activeNorm.length} active sources ═══`);
 
       // Step 5: Run the scan (reuse the same scan loop as POST path)
       const added = [], updated = [], suppressed = [];
-      let skipNP = 0, skipDupe = 0, skipLowQuality = 0, fetchOk = 0, fetchFail = 0, parseHits = 0;
+      let skipNP = 0, skipDupe = 0, skipLowQuality = 0, fetchOk = 0, fetchFail = 0, parseHits = 0, skipSuppressed = 0;
       let skipGenericTitle = 0, skipPortalTitle = 0, skipWeakAEFit = 0, skipInfraOnly = 0, skipNotProjectSpecific = 0;
       const MIN_BOARD_RELEVANCE_ACTIVE = 35;
       const MIN_BOARD_RELEVANCE_WATCH = 22;
@@ -5475,6 +5499,8 @@ export default async function handler(req, res) {
               if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
               const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
               if (isDupe) { skipDupe++; continue; }
+              const sr = checkSuppressionRules(lead.title, suppressionRules);
+              if (sr) { skipSuppressed++; log(`    ⊘ suppressed: "${lead.title.slice(0,50)}" — rule: "${sr.pattern}"`); continue; }
               if (isGenericNewsHeadline(lead.title)) { skipGenericTitle++; continue; }
               if (isRetrospectiveTitle(lead.title)) { skipNotProjectSpecific++; continue; }
               exSet.add(tl); addedTitles.push(lead.title); added.push(lead); noticeAdded++;
@@ -5506,6 +5532,8 @@ export default async function handler(req, res) {
                 if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
                 const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
                 if (isDupe) { skipDupe++; continue; }
+                const sr = checkSuppressionRules(lead.title, suppressionRules);
+                if (sr) { skipSuppressed++; log(`    ⊘ suppressed: "${lead.title.slice(0,50)}" — rule: "${sr.pattern}"`); continue; }
                 exSet.add(tl); addedTitles.push(lead.title); added.push(lead); gmailAdded++;
                 log(`    ✚ [${lead.status}] "${lead.title.slice(0,60)}" | ${lead.projectPotential || '?'} potential`);
               }
@@ -5542,6 +5570,8 @@ export default async function handler(req, res) {
           const nearDupe = addedTitles.some(at => titleSimilarity(c.title, at) >= 0.65) ||
             allEx.some(ex => titleSimilarity(c.title, ex.title) >= 0.65);
           if (nearDupe) { skipDupe++; continue; }
+          const sr = checkSuppressionRules(c.title, suppressionRules);
+          if (sr) { skipSuppressed++; log(`    ⊘ suppressed: "${c.title.slice(0,50)}" — rule: "${sr.pattern}"`); continue; }
           if (isGenericNewsHeadline(c.title)) { skipGenericTitle++; continue; }
           if (isRetrospectiveTitle(c.title)) { skipNotProjectSpecific++; continue; }
           if (isNavigationJunk(c.title)) { skipGenericTitle++; continue; }
@@ -6475,6 +6505,8 @@ export default async function handler(req, res) {
 
     // ── DAILY / BACKFILL ────────────────────────────────────
     const { sources, focusPoints, targetOrgs, existingLeads, notPursuedLeads, taxonomy, settings } = body;
+    // v4-b35: Load suppression rules (from POST body or from Upstash for server-side scans)
+    const suppressionRules = body.suppressionRules || [];
     if (!sources?.length) return res.status(400).json({ error: 'body.sources required (array)' });
 
     const active = sources.filter(s => s.active !== false);
@@ -6526,7 +6558,8 @@ export default async function handler(req, res) {
     const added = [], updated = [], suppressed = [];
     let skipNP = 0, skipDupe = 0, skipLowQuality = 0, fetchOk = 0, fetchFail = 0, parseHits = 0;
     // Step 12: Observability counters for quality gates
-    let skipGenericTitle = 0, skipPortalTitle = 0, skipWeakAEFit = 0, skipInfraOnly = 0, skipNotProjectSpecific = 0;
+    let skipGenericTitle = 0, skipPortalTitle = 0, skipWeakAEFit = 0, skipInfraOnly = 0, skipNotProjectSpecific = 0, skipSuppressed = 0;
+    if (suppressionRules.length > 0) log(`Suppression rules: ${suppressionRules.length} active`);
     // v31: Separate thresholds — Watch uses a lower bar to preserve project generators
     // v4-b6: Raised Watch from 15 to 22 — geography alone (20) plus 1 keyword (2) now barely passes.
     // This prevents items with zero signal beyond geography from surviving.
@@ -6561,6 +6594,9 @@ export default async function handler(req, res) {
             // Dedup against already-added leads in this scan
             const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
             if (isDupe) { skipDupe++; continue; }
+            // Suppression check
+            const suppRule = checkSuppressionRules(lead.title, suppressionRules);
+            if (suppRule) { skipSuppressed++; log(`    ⊘ suppressed: "${lead.title.slice(0,50)}" — rule: "${suppRule.pattern}" (${suppRule.reason || 'user suppressed'})`); continue; }
             // Title quality gates
             if (isGenericNewsHeadline(lead.title)) { skipGenericTitle++; continue; }
             if (isRetrospectiveTitle(lead.title)) { skipNotProjectSpecific++; continue; }
@@ -6631,6 +6667,9 @@ export default async function handler(req, res) {
               if (exSet.has(tl) || npSet.has(tl) || submittedSet.has(tl)) { skipDupe++; continue; }
               const isDupe = addedTitles.some(at => titleSimilarity(lead.title, at) >= 0.65);
               if (isDupe) { skipDupe++; continue; }
+              // Suppression check
+              const suppRule = checkSuppressionRules(lead.title, suppressionRules);
+              if (suppRule) { skipSuppressed++; log(`    ⊘ suppressed: "${lead.title.slice(0,50)}" — rule: "${suppRule.pattern}" (${suppRule.reason || 'user suppressed'})`); continue; }
 
               exSet.add(tl);
               addedTitles.push(lead.title);
@@ -7026,8 +7065,14 @@ export default async function handler(req, res) {
           log(`    ⊘ BLOCKED (retrospective title): ${c.title.slice(0,60)}`);
           continue;
         }
+        // v4-b35: Suppression rule check
+        const suppRule = checkSuppressionRules(c.title, suppressionRules);
+        if (suppRule) {
+          skipSuppressed++;
+          log(`    ⊘ suppressed: "${c.title.slice(0,50)}" — rule: "${suppRule.pattern}" (${suppRule.reason || 'user suppressed'})`);
+          continue;
+        }
         // Step 14b: v4-b6 — Generic news headline filter
-        // Catches market-commentary, listicle, and vague trend titles.
         if (isGenericNewsHeadline(c.title)) {
           skipGenericTitle++;
           suppressed.push({ title: c.title, relevanceScore: c.relevanceScore, reason: 'generic_news_headline' });
@@ -7142,10 +7187,11 @@ export default async function handler(req, res) {
     const results = {
       leadsAdded: added, leadsUpdated: updated, leadsSuppressed: suppressed,
       skippedNotPursued: skipNP, skippedDuplicate: skipDupe, skippedLowQuality: skipLowQuality,
+      skippedSuppressed: skipSuppressed,
       skippedGenericTitle: skipGenericTitle, skippedPortalTitle: skipPortalTitle,
       skippedWeakAEFit: skipWeakAEFit, skippedInfraOnly: skipInfraOnly,
       skippedNotProjectSpecific: skipNotProjectSpecific,
-      totalQualityBlocked: skipGenericTitle + skipPortalTitle + skipWeakAEFit + skipInfraOnly + skipNotProjectSpecific,
+      totalQualityBlocked: skipGenericTitle + skipPortalTitle + skipWeakAEFit + skipInfraOnly + skipNotProjectSpecific + skipSuppressed,
       sourcesFetched: fetchOk + fetchFail, fetchSuccesses: fetchOk, fetchFailures: fetchFail,
       parseHits, duration: dur, mode: 'live',
       // v4-b13: Per-source health for frontend source registry updates
